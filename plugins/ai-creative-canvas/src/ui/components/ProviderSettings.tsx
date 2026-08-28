@@ -451,8 +451,10 @@ export function ProviderSettings() {
                           <Row label="轮询 URL（含 {taskId}）"><input className="ace-input" value={draft.pollUrl || ''} onChange={(event) => updateDraft({ pollUrl: event.target.value })} /></Row>
                           <Row label="任务 ID 路径"><input className="ace-input" value={draft.taskIdPath || ''} onChange={(event) => updateDraft({ taskIdPath: event.target.value })} /></Row>
                           <Row label="状态字段"><input className="ace-input" value={draft.statusField || ''} onChange={(event) => updateDraft({ statusField: event.target.value })} /></Row>
-                          <Row label="结果 URL 路径"><input className="ace-input" value={draft.videoUrlPath || ''} onChange={(event) => updateDraft({ videoUrlPath: event.target.value })} /></Row>
+                          <Row label="结果 URL 路径" hint="可用 | 按优先级填写多个回退路径，例如 videoUrl|ossUrl"><input className="ace-input" value={draft.videoUrlPath || ''} onChange={(event) => updateDraft({ videoUrlPath: event.target.value })} /></Row>
                           <Row label="轮询间隔 ms"><input className="ace-input" type="number" value={draft.pollIntervalMs || 3000} onChange={(event) => updateDraft({ pollIntervalMs: Number(event.target.value) || 3000 })} /></Row>
+                          <Row label="请求超时 ms"><input className="ace-input" type="number" min="1000" value={draft.timeoutMs || 600000} onChange={(event) => updateDraft({ timeoutMs: Number(event.target.value) || 600000 })} /></Row>
+                          <Row label="提交重试次数" hint="无幂等保证或可能重复计费时请设为 0"><input className="ace-input" type="number" min="0" max="5" step="1" value={draft.submitRetries ?? 2} onChange={(event) => updateDraft({ submitRetries: Number(event.target.value) })} /></Row>
                         </div>
                         <Row label="请求体模板" hint="支持 {prompt}、{model}、{imageUrl}、{lastImageUrl}、{duration}、{aspect} 和条件块 {?x}…{/x}"><textarea className="ace-input resize-y font-mono text-[10px] leading-relaxed" rows={8} value={draft.bodyTemplate || ''} onChange={(event) => updateDraft({ bodyTemplate: event.target.value })} /></Row>
                         <div className="grid grid-cols-3 gap-3">
@@ -472,13 +474,14 @@ export function ProviderSettings() {
                           <Row label="任务 ID 路径"><input className="ace-input" value={draft.idPath || ''} onChange={(event) => updateDraft({ idPath: event.target.value })} /></Row>
                           <Row label="轮询路径（含 {id}）"><input className="ace-input" value={draft.statusPath || ''} onChange={(event) => updateDraft({ statusPath: event.target.value })} /></Row>
                           <Row label="状态字段"><input className="ace-input" value={draft.statusField || ''} onChange={(event) => updateDraft({ statusField: event.target.value })} /></Row>
-                          <Row label="结果 URL 路径"><input className="ace-input" value={draft.resultPath || ''} onChange={(event) => updateDraft({ resultPath: event.target.value })} /></Row>
+                          <Row label="结果 URL 路径" hint="可用 | 按优先级填写多个回退路径"><input className="ace-input" value={draft.resultPath || ''} onChange={(event) => updateDraft({ resultPath: event.target.value })} /></Row>
                           <Row label="轮询间隔 ms"><input className="ace-input" type="number" value={draft.pollIntervalMs || 2000} onChange={(event) => updateDraft({ pollIntervalMs: Number(event.target.value) || 2000 })} /></Row>
                         </div>
                         <div className="grid grid-cols-3 gap-3">
                           <Row label="图片模式"><select className="ace-input" value={draft.imageMode || 'none'} onChange={(event) => updateDraft({ imageMode: event.target.value as ProviderConfig['imageMode'] })}><option value="none">不传图</option><option value="dataurl">DataURL</option><option value="url">公网 URL（先上传）</option></select></Row>
                           <Row label="图片字段"><input className="ace-input" value={draft.imageField || ''} onChange={(event) => updateDraft({ imageField: event.target.value })} /></Row>
                           <Row label="超时 ms"><input className="ace-input" type="number" value={draft.timeoutMs || 600000} onChange={(event) => updateDraft({ timeoutMs: Number(event.target.value) || 600000 })} /></Row>
+                          <Row label="提交重试次数" hint="无幂等保证或可能重复计费时请设为 0"><input className="ace-input" type="number" min="0" max="5" step="1" value={draft.submitRetries ?? 2} onChange={(event) => updateDraft({ submitRetries: Number(event.target.value) })} /></Row>
                         </div>
                         {draft.imageMode === 'url' && <div className="grid grid-cols-3 gap-3"><Row label="图床上传 URL"><input className="ace-input" value={draft.uploadUrl || ''} onChange={(event) => updateDraft({ uploadUrl: event.target.value })} /></Row><Row label="上传字段"><input className="ace-input" value={draft.uploadField || ''} onChange={(event) => updateDraft({ uploadField: event.target.value })} /></Row><Row label="返回 URL 路径"><input className="ace-input" value={draft.uploadUrlPath || ''} onChange={(event) => updateDraft({ uploadUrlPath: event.target.value })} /></Row></div>}
                         <Row label="额外请求体（JSON）"><textarea className="ace-input resize-y font-mono text-[10px]" rows={5} value={draft.extraBody || ''} onChange={(event) => updateDraft({ extraBody: event.target.value })} /></Row>

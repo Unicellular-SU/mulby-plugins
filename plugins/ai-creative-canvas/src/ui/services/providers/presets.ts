@@ -76,6 +76,67 @@ const toapis = (over: Partial<ProviderConfig>): ProviderConfig =>
 // 占位说明：{prompt} {model} 必有；{imageUrl}/{lastImageUrl} 为上传后的公网图 URL（配合首帧/尾帧开关）；
 // {aspect}/{duration} 取自节点参数；{?x}…{/x} 仅在 x 非空时出现；{?noImage} 仅文生视频时出现。
 export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
+  {
+    id: 'raydu-seedance25',
+    label: 'Raydu · Seedance 2.5（异步直连）',
+    hint: 'seedance25：支持文生视频、单图参考与首尾帧两图模式，图片可用 URL/DataURL；画幅 16:9/9:16/1:1/4:3/3:4，时长 5/10/15/20/30 秒，默认开启原生音频。',
+    make: () =>
+      base({
+        label: 'Raydu Seedance 2.5',
+        baseURL: 'https://raydu.liekumall.com',
+        healthCheckUrl: 'https://raydu.liekumall.com/healthz',
+        model: 'seedance25',
+        models: ['seedance25'],
+        submitUrl: 'https://raydu.liekumall.com/v1/video/generations',
+        pollUrl: 'https://raydu.liekumall.com/v1/video/generations/{taskId}',
+        taskIdPath: 'task_id',
+        statusField: 'status',
+        doneValues: 'completed',
+        videoUrlPath: 'result_url',
+        timeoutMs: 1800000,
+        submitRetries: 0,
+        capabilities: {
+          textToVideo: true,
+          imageToVideo: true,
+          lastFrame: true,
+          nativeAudio: true,
+          aspects: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+          durations: [5, 10, 15, 20, 30],
+          resolutions: ['720p', '1080p']
+        },
+        bodyTemplate:
+          '{"model":"{model}","prompt":"{prompt}"{?imageUrl},"images":["{imageUrl}"{?lastImageUrl},"{lastImageUrl}"{/lastImageUrl}]{/imageUrl},"settings":{"resolution":"{resolution}","ratio":"{aspect}","duration":{duration},"enableSound":"on"}}'
+      })
+  },
+  {
+    id: 'raydu-seedance25-sync',
+    label: 'Raydu · Seedance 2.5（同步直连）',
+    hint: '同步等待 2～6 分钟后直接返回视频；客户端超时 720 秒，服务端等待上限 600 秒。若返回 504，请改用异步直连模板。支持文生视频、单图参考与首尾帧两图模式。',
+    make: () =>
+      base({
+        label: 'Raydu Seedance 2.5（同步）',
+        baseURL: 'https://raydu.liekumall.com',
+        healthCheckUrl: 'https://raydu.liekumall.com/healthz',
+        model: 'seedance25',
+        models: ['seedance25'],
+        submitUrl: 'https://raydu.liekumall.com/v1/video/generate',
+        videoUrlPath: 'videoUrl|ossUrl|originalUrl',
+        timeoutMs: 720000,
+        submitRetries: 0,
+        capabilities: {
+          textToVideo: true,
+          imageToVideo: true,
+          lastFrame: true,
+          nativeAudio: true,
+          aspects: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+          durations: [5, 10, 15, 20, 30],
+          resolutions: ['720p', '1080p']
+        },
+        bodyTemplate:
+          '{"model":"{model}","prompt":"{prompt}"{?imageUrl},"images":["{imageUrl}"{?lastImageUrl},"{lastImageUrl}"{/lastImageUrl}]{/imageUrl},"settings":{"resolution":"{resolution}","ratio":"{aspect}","duration":{duration},"enableSound":"on"},"timeoutMs":600000}'
+      })
+  },
+
   // —— toapis 视频全系列（按各模型真实请求体差异分家族）——
   {
     id: 'toapis-veo3',

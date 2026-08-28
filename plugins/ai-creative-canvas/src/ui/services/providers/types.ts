@@ -43,9 +43,11 @@ export interface ProviderConfig {
   statusField?: string // 轮询响应里状态字段的 JSON 路径
   doneValues?: string // 终态(成功) csv
   failValues?: string // 终态(失败) csv
-  resultPath?: string // 结果媒体 URL 的 JSON 路径
+  resultPath?: string // 结果媒体 URL 的 JSON 路径；可用 | 按优先级声明多个回退路径
   pollIntervalMs?: number
   timeoutMs?: number
+  /** 瞬时 HTTP 错误后的额外提交次数；默认 2。无幂等保证或可能重复计费时应设为 0。 */
+  submitRetries?: number
 
   // 图生视频需公网图 URL 时的图床上传
   uploadUrl?: string
@@ -59,7 +61,7 @@ export interface ProviderConfig {
   submitUrl?: string // 完整提交 URL
   pollUrl?: string // 完整轮询 URL（含 {taskId}）
   taskIdPath?: string // 提交响应里任务 id 路径
-  videoUrlPath?: string // 结果媒体 URL 路径
+  videoUrlPath?: string // 结果媒体 URL 路径；可用 | 按优先级声明多个回退路径
   headers?: Record<string, string> // 额外请求头
 
   // ---- openai-tts ----

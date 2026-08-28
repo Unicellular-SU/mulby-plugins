@@ -7,6 +7,7 @@ import {
   resolveVideoCapabilities,
   validateProviderConfig
 } from '../../src/ui/services/providers/config.ts'
+import { PROVIDER_TEMPLATES } from '../../src/ui/services/providers/presets.ts'
 import type { ProviderConfig } from '../../src/ui/services/providers/types.ts'
 import type { Card } from '../../src/ui/types.ts'
 
@@ -59,6 +60,8 @@ function testValidation() {
   assert.equal(isProviderConfigShape(templateProvider), true)
   assert.equal(isProviderConfigShape({ id: 'broken' }), false)
   assert.equal(isProviderConfigShape({ ...templateProvider, headers: { Authorization: 42 } }), false)
+  assert.equal(isProviderConfigShape({ ...templateProvider, submitRetries: -1 }), false)
+  assert.ok(validateProviderConfig({ ...templateProvider, submitRetries: 1.5 }).some((issue) => issue.field === 'submitRetries'))
 }
 
 function testCapabilitiesAndCardSchema() {
@@ -76,7 +79,66 @@ function testCapabilitiesAndCardSchema() {
   assert.ok(getParamSchema(card).some((field) => field.type === 'select' && field.key === 'refMode'), '未配置 Provider 时应保留通用参数')
 }
 
+function testSeedance25Preset() {
+  const template = PROVIDER_TEMPLATES.find((item) => item.id === 'raydu-seedance25')
+  assert.ok(template, '应提供 Raydu Seedance 2.5 模板')
+  const provider = template.make()
+  assert.equal(provider.model, 'seedance25')
+  assert.equal(provider.submitUrl, 'https://raydu.liekumall.com/v1/video/generations')
+  assert.equal(provider.pollUrl, 'https://raydu.liekumall.com/v1/video/generations/{taskId}')
+  assert.equal(provider.taskIdPath, 'task_id')
+  assert.equal(provider.statusField, 'status')
+  assert.equal(provider.videoUrlPath, 'result_url')
+  assert.equal(provider.submitRetries, 0)
+  assert.equal(validateProviderConfig(provider).filter((issue) => issue.level === 'error').length, 0)
+
+  const preview = buildProviderRequestPreview(provider, true)
+  assert.deepEqual(preview.body, {
+    model: 'seedance25',
+    prompt: '示例视频描述',
+    images: [
+      'https://example.invalid/reference.png',
+      'https://example.invalid/last-frame.png'
+    ],
+    settings: {
+      resolution: '720p',
+      ratio: '16:9',
+      duration: 5,
+      enableSound: 'on'
+    }
+  })
+  assert.equal(preview.pollUrl, 'https://raydu.liekumall.com/v1/video/generations/task-demo')
+
+  const syncTemplate = PROVIDER_TEMPLATES.find((item) => item.id === 'raydu-seedance25-sync')
+  assert.ok(syncTemplate, '应提供 Raydu Seedance 2.5 同步模板')
+  const syncProvider = syncTemplate.make()
+  assert.equal(syncProvider.submitUrl, 'https://raydu.liekumall.com/v1/video/generate')
+  assert.equal(syncProvider.pollUrl, undefined)
+  assert.equal(syncProvider.videoUrlPath, 'videoUrl|ossUrl|originalUrl')
+  assert.equal(syncProvider.timeoutMs, 720000)
+  assert.equal(syncProvider.submitRetries, 0)
+  assert.equal(validateProviderConfig(syncProvider).filter((issue) => issue.level === 'error').length, 0)
+  const syncPreview = buildProviderRequestPreview(syncProvider, true)
+  assert.deepEqual(syncPreview.body, {
+    model: 'seedance25',
+    prompt: '示例视频描述',
+    images: [
+      'https://example.invalid/reference.png',
+      'https://example.invalid/last-frame.png'
+    ],
+    settings: {
+      resolution: '720p',
+      ratio: '16:9',
+      duration: 5,
+      enableSound: 'on'
+    },
+    timeoutMs: 600000
+  })
+  assert.equal(syncPreview.pollUrl, undefined)
+}
+
 testTemplateAndPreview()
 testValidation()
 testCapabilitiesAndCardSchema()
-console.log('provider config: 25 assertions OK')
+testSeedance25Preset()
+console.log('provider config: assertions OK')

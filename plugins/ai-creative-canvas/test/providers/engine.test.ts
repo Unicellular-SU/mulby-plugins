@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict'
 import type { ProviderConfig } from '../../src/ui/services/providers/types.ts'
 import { submitVideoJob, runVideoJob, resumeVideoJob, testProvider } from '../../src/ui/services/providers/engine.ts'
+import { PROVIDER_TEMPLATES } from '../../src/ui/services/providers/presets.ts'
 
 const cfg = {
   id: 'p1',
@@ -165,6 +166,102 @@ async function testCrossOriginHealthDoesNotLeakCredentials() {
   installHttp()
 }
 
+async function testSeedance25TemplateRequestAndPoll() {
+  calls = []
+  let submitRequest: any
+  ;(globalThis as any).window.mulby.http.request = async (request: any) => {
+    calls.push({ method: request.method, url: request.url })
+    if (request.method === 'POST') {
+      submitRequest = request
+      return { status: 202, data: { task_id: 'task-seedance25', status: 'processing' } }
+    }
+    return {
+      status: 200,
+      data: {
+        task_id: 'task-seedance25',
+        status: 'completed',
+        result_url: 'https://raydu.liekumall.com/results/seedance25.mp4'
+      }
+    }
+  }
+  const template = PROVIDER_TEMPLATES.find((item) => item.id === 'raydu-seedance25')
+  assert.ok(template)
+  const provider = { ...template.make(), pollIntervalMs: 1 }
+  const result = await runVideoJob(provider, 'SECRET', {
+    prompt: '一只橘猫在花园里行走',
+    imageDataUrl: 'data:image/png;base64,FIRST',
+    lastImageDataUrl: 'data:image/png;base64,LAST',
+    params: { resolution: '1080p', aspect: '9:16', duration: 30 }
+  })
+  assert.equal(result.url, 'https://raydu.liekumall.com/results/seedance25.mp4')
+  assert.equal(submitRequest.url, 'https://raydu.liekumall.com/v1/video/generations')
+  assert.equal(submitRequest.headers.Authorization, 'Bearer SECRET')
+  assert.deepEqual(submitRequest.body, {
+    model: 'seedance25',
+    prompt: '一只橘猫在花园里行走',
+    images: ['data:image/png;base64,FIRST', 'data:image/png;base64,LAST'],
+    settings: {
+      resolution: '1080p',
+      ratio: '9:16',
+      duration: 30,
+      enableSound: 'on'
+    }
+  })
+  assert.ok(gets().some((call) => call.url === 'https://raydu.liekumall.com/v1/video/generations/task-seedance25'))
+  installHttp()
+}
+
+async function testSeedance25SyncTemplateAndUrlFallbacks() {
+  calls = []
+  let submitRequest: any
+  let response: Record<string, unknown> = {}
+  let responseStatus = 200
+  ;(globalThis as any).window.mulby.http.request = async (request: any) => {
+    calls.push({ method: request.method, url: request.url })
+    submitRequest = request
+    return { status: responseStatus, data: response }
+  }
+  const template = PROVIDER_TEMPLATES.find((item) => item.id === 'raydu-seedance25-sync')
+  assert.ok(template)
+  const provider = template.make()
+  const req = {
+    prompt: '从白天平滑过渡到夜晚',
+    imageDataUrl: 'data:image/png;base64,DAY',
+    lastImageDataUrl: 'data:image/png;base64,NIGHT',
+    params: { resolution: '720p', aspect: '16:9', duration: 10 }
+  }
+
+  response = { videoUrl: 'https://result.test/video.mp4', ossUrl: 'https://result.test/oss.mp4', originalUrl: 'https://result.test/original.mp4' }
+  assert.equal((await submitVideoJob(provider, 'SECRET', req)).url, 'https://result.test/video.mp4', '优先读取 videoUrl')
+  response = { ossUrl: 'https://result.test/oss.mp4', originalUrl: 'https://result.test/original.mp4' }
+  assert.equal((await submitVideoJob(provider, 'SECRET', req)).url, 'https://result.test/oss.mp4', 'videoUrl 缺失时回退 ossUrl')
+  response = { originalUrl: 'https://result.test/original.mp4' }
+  assert.equal((await submitVideoJob(provider, 'SECRET', req)).url, 'https://result.test/original.mp4', '再次回退 originalUrl')
+
+  assert.equal(submitRequest.url, 'https://raydu.liekumall.com/v1/video/generate')
+  assert.equal(submitRequest.timeout, 720000)
+  assert.equal(submitRequest.headers.Authorization, 'Bearer SECRET')
+  assert.deepEqual(submitRequest.body, {
+    model: 'seedance25',
+    prompt: '从白天平滑过渡到夜晚',
+    images: ['data:image/png;base64,DAY', 'data:image/png;base64,NIGHT'],
+    settings: {
+      resolution: '720p',
+      ratio: '16:9',
+      duration: 10,
+      enableSound: 'on'
+    },
+    timeoutMs: 600000
+  })
+  assert.equal(gets().length, 0, '同步模板不得发起轮询请求')
+  const callsBefore504 = calls.length
+  responseStatus = 504
+  response = { error: 'upstream timeout' }
+  await assert.rejects(() => submitVideoJob(provider, 'SECRET', req), /提交失败 HTTP 504/)
+  assert.equal(calls.length, callsBefore504 + 1, '同步生成 504 不得自动重试，以免重复创建计费任务')
+  installHttp()
+}
+
 async function main() {
   installHttp()
   await testSubmitDoesNotPoll()
@@ -175,7 +272,9 @@ async function main() {
   await testTtsAuthFailure()
   await testDefaultRequestUsesDeclaredFields()
   await testCrossOriginHealthDoesNotLeakCredentials()
-  console.log('provider engine: 8 tests OK')
+  await testSeedance25TemplateRequestAndPoll()
+  await testSeedance25SyncTemplateAndUrlFallbacks()
+  console.log('provider engine: 10 tests OK')
 }
 
 main().catch((e) => {

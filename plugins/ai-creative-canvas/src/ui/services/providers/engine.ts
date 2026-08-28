@@ -28,6 +28,13 @@ function jget(obj: any, path?: string): any {
   }
   return cur
 }
+function jgetFirst(obj: any, paths?: string): any {
+  for (const path of (paths || '').split('|').map((item) => item.trim()).filter(Boolean)) {
+    const value = jget(obj, path)
+    if (value != null && value !== '') return value
+  }
+  return undefined
+}
 function setPath(obj: any, path: string, val: any): void {
   const segs = path.split('.')
   let cur = obj
@@ -55,9 +62,9 @@ function transient(r: { status: number; data: any }): boolean {
   return /timed out|timeout|fail_to_fetch|bad gateway|gateway timeout/i.test(String(r.data ?? ''))
 }
 // 提交带退避重试：这类瞬时上游超时重试几次往往能过
-async function submitWithRetry(url: string, headers: any, body: any, timeoutMs: number): Promise<{ status: number; data: any }> {
+async function submitWithRetry(url: string, headers: any, body: any, timeoutMs: number, retries: number): Promise<{ status: number; data: any }> {
   let resp = await httpReq(url, 'POST', headers, body, timeoutMs)
-  for (let i = 0; i < 2 && resp.status >= 400 && transient(resp); i++) {
+  for (let i = 0; i < retries && resp.status >= 400 && transient(resp); i++) {
     await sleep(3000)
     resp = await httpReq(url, 'POST', headers, body, timeoutMs)
   }
@@ -89,7 +96,7 @@ async function pollTaskTemplate(cfg: ProviderConfig, headers: any, taskId: strin
     try { sr = await httpReq((cfg.pollUrl as string).replace('{taskId}', taskId), 'GET', headers, undefined, 60000) } catch { continue } // 瞬时网络抖动：跳过本次，下一周期再试（不回拨进度）
     if (transient(sr)) continue // 网关瞬时错误：重试，不放弃整任务
     const sd = parse(sr.data)
-    const url = jget(sd, cfg.videoUrlPath)
+    const url = jgetFirst(sd, cfg.videoUrlPath)
     if (url) return url
     const st = String(jget(sd, cfg.statusField) ?? '').toLowerCase()
     onProgress?.(0.5)
@@ -117,13 +124,13 @@ async function pollTaskDefault(cfg: ProviderConfig, headers: any, base: string, 
     try { sr = await httpReq(statusUrl, 'GET', headers, undefined, 60000) } catch { continue } // 瞬时网络抖动：跳过本次，下一周期再试（不回拨进度）
     if (transient(sr)) continue // 网关瞬时错误：重试，不放弃整任务
     const sd = parse(sr.data)
-    let url = jget(sd, cfg.resultPath)
+    let url = jgetFirst(sd, cfg.resultPath)
     if (url) return url
     const st = String(jget(sd, cfg.statusField) ?? '').toLowerCase()
     onProgress?.(0.5)
     if (st && fail.includes(st)) throw new Error('生成失败：' + st)
     if (st && done.includes(st)) {
-      url = jget(sd, cfg.resultPath)
+      url = jgetFirst(sd, cfg.resultPath)
       if (url) return url
       throw new Error('已完成但未找到结果 URL（检查 resultPath）')
     }
@@ -188,10 +195,10 @@ async function submitViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq
   const headers: any = { 'Content-Type': 'application/json', ...(cfg.headers || {}) }
   if (key) headers['Authorization'] = `Bearer ${key}`
   onProgress?.(0.1)
-  const resp = await submitWithRetry(cfg.submitUrl as string, headers, body, cfg.timeoutMs || 600000)
+  const resp = await submitWithRetry(cfg.submitUrl as string, headers, body, cfg.timeoutMs || 600000, cfg.submitRetries ?? 2)
   if (resp.status >= 400) throw new Error(`提交失败 HTTP ${resp.status}: ${String(resp.data).slice(0, 200)}`)
   const data = parse(resp.data)
-  const url = jget(data, cfg.videoUrlPath)
+  const url = jgetFirst(data, cfg.videoUrlPath)
   const taskId = jget(data, cfg.taskIdPath)
   if (taskId) onTask?.(String(taskId))
   return { url: typeof url === 'string' ? url : undefined, taskId: taskId ? String(taskId) : undefined }
@@ -236,10 +243,10 @@ async function submitDefault(cfg: ProviderConfig, key: string, req: VideoReq, on
   const base = cfg.baseURL.replace(/\/$/, '')
   const submitUrl = base + (cfg.submitPath || '')
   onProgress?.(0.1)
-  const resp = await submitWithRetry(submitUrl, headers, body, cfg.timeoutMs || 600000)
+  const resp = await submitWithRetry(submitUrl, headers, body, cfg.timeoutMs || 600000, cfg.submitRetries ?? 2)
   if (resp.status >= 400) throw new Error(`提交失败 HTTP ${resp.status}: ${String(resp.data).slice(0, 200)}`)
   const data = parse(resp.data)
-  const url = jget(data, cfg.resultPath)
+  const url = jgetFirst(data, cfg.resultPath)
   const taskId = jget(data, cfg.idPath)
   if (taskId) onTask?.(String(taskId))
   return { url: typeof url === 'string' ? url : undefined, taskId: taskId ? String(taskId) : undefined }

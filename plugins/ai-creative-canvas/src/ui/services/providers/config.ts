@@ -89,6 +89,7 @@ export function isProviderConfigShape(value: unknown): value is ProviderConfig {
     && (candidate.type === 'custom-video' || candidate.type === 'openai-tts')
     && typeof candidate.baseURL === 'string'
     && (candidate.headers == null || isStringRecord(candidate.headers))
+    && (candidate.submitRetries == null || (Number.isInteger(candidate.submitRetries) && candidate.submitRetries >= 0 && candidate.submitRetries <= 5))
     && (candidate.pricing == null || (
       typeof candidate.pricing === 'object'
       && typeof candidate.pricing.currency === 'string'
@@ -183,6 +184,7 @@ export function validateProviderConfig(provider: ProviderConfig, rawHeaders?: st
   if (!capabilities.textToVideo && !capabilities.imageToVideo) error('capabilities', '至少启用文生视频或图生视频之一')
   if (capabilities.lastFrame && !capabilities.imageToVideo) error('capabilities.lastFrame', '启用尾帧前必须先启用图生视频')
   if (provider.models?.length && !provider.model) warning('model', '尚未选择默认模型，将使用模型清单第一项')
+  if (provider.submitRetries != null && (!Number.isInteger(provider.submitRetries) || provider.submitRetries < 0 || provider.submitRetries > 5)) error('submitRetries', '提交重试次数必须是 0～5 的整数')
   if (provider.pollIntervalMs != null && provider.pollIntervalMs < 500) warning('pollIntervalMs', '轮询间隔低于 500ms，可能触发服务端限流')
   return issues
 }
