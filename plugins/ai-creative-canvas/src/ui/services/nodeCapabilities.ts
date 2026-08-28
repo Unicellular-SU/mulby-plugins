@@ -1,5 +1,7 @@
 import type { Card, CardKind, Material, MaterialKind } from '../types'
 import { isRegisteredNodeKind, resolveNodeInputPolicy, resolveNodeSpec, type NodeInputPolicy } from './nodeSpecs'
+import type { ProviderConfig } from './providers/types'
+import { resolveVideoCapabilities } from './providers/config'
 
 export type { NodeInputPolicy } from './nodeSpecs'
 
@@ -23,21 +25,25 @@ export function materialKindOfCard(card: Card): MaterialKind | null {
   return resolveNodeSpec(card.kind).output.materialKind || null
 }
 
-export function inputPolicyFor(card: Card): NodeInputPolicy {
-  return resolveNodeInputPolicy(card.kind, { params: card.params })
+export function inputPolicyFor(card: Card, provider?: ProviderConfig): NodeInputPolicy {
+  return resolveNodeInputPolicy(card.kind, {
+    params: card.params,
+    provider,
+    videoCapabilities: provider ? resolveVideoCapabilities(provider) : undefined
+  })
 }
 
-export function acceptsMaterialKind(card: Card, kind: MaterialKind): boolean {
-  return inputPolicyFor(card).accepted.includes(kind)
+export function acceptsMaterialKind(card: Card, kind: MaterialKind, provider?: ProviderConfig): boolean {
+  return inputPolicyFor(card, provider).accepted.includes(kind)
 }
 
-export function acceptedMaterialKinds(card: Card): MaterialKind[] {
-  return [...inputPolicyFor(card).accepted]
+export function acceptedMaterialKinds(card: Card, provider?: ProviderConfig): MaterialKind[] {
+  return [...inputPolicyFor(card, provider).accepted]
 }
 
 /** 按节点真实消费能力过滤并应用同类数量上限，顺序保持与素材条一致。 */
-export function consumableMaterials(card: Card, materials: Material[]): Material[] {
-  const policy = inputPolicyFor(card)
+export function consumableMaterials(card: Card, materials: Material[], provider?: ProviderConfig): Material[] {
+  const policy = inputPolicyFor(card, provider)
   const used: Partial<Record<MaterialKind, number>> = {}
   return materials.filter((material) => {
     if (!policy.accepted.includes(material.kind)) return false

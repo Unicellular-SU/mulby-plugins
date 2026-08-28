@@ -164,6 +164,35 @@ function testUnsupportedMediaNeverBecomesGenerationInput() {
   assert.equal(canConnect(b.cards.clip, b.cards.me).ok, false)
 }
 
+function testVideoReferencesAreOrderedAndReusable() {
+  const b = board({
+    generated: card('generated', {
+      kind: 'video',
+      title: '生成片段',
+      assetUrl: 'file:///downloaded.mp4',
+      assetLocalPath: '/downloaded.mp4',
+      meta: { videoGeneration: { sourceUrl: 'https://cdn.test/generated.mp4' } }
+    }),
+    me: card('me', {
+      kind: 'video',
+      refIds: ['generated'],
+      assets: [
+        { id: 'image-a', kind: 'image', name: '首图.png', url: 'file:///first.png' },
+        { id: 'video-b', kind: 'video', name: '公网片段.mp4', url: 'https://cdn.test/reference.mp4' }
+      ],
+      params: { referenceOrder: ['upload:video-b', 'card:generated', 'upload:image-a'] }
+    })
+  })
+  const selected = selectedGenMaterials(b.cards.me, b)
+  assert.deepEqual(selected.filter((material) => material.kind !== 'text').map((material) => material.matId), ['upload:video-b', 'card:generated', 'upload:image-a'])
+  const inputs = resolveGenInputs(b.cards.me, b)
+  assert.deepEqual(inputs.videos.map((video) => video.url), ['https://cdn.test/reference.mp4', 'https://cdn.test/generated.mp4'])
+  assert.equal(inputs.images.length, 1)
+  const mentioned = resolveGenerationPrompt({ ...b.cards.me, prompt: '沿用 @公网片段 的运动' }, b, 'media')
+  assert.equal(mentioned.text, '沿用 参考视频「公网片段」 的运动')
+  assert.deepEqual(mentioned.inputs.videos.map((video) => video.url), ['https://cdn.test/reference.mp4'])
+}
+
 function testImportedMediaIsSourceOnly() {
   const imported = card('imported', { kind: 'video', meta: { resourceRole: 'source' }, assetUrl: 'file:///clip.mp4' })
   const prompt = card('prompt', { kind: 'text', text: '镜头向前推进' })
@@ -273,8 +302,9 @@ testTextMentionExpandsAndNarrowsInputs()
 testImageMentionKeepsAttachmentSemantics()
 testInvalidMentionFallsBackWithoutLeakingToken()
 testUnsupportedMediaNeverBecomesGenerationInput()
+testVideoReferencesAreOrderedAndReusable()
 testImportedMediaIsSourceOnly()
 testMissingMediaStaysVisibleButCannotBeConsumed()
 testEmbeddedTextSurvivesMissingOriginalFile()
 testStableAnchorBindingAndExplicitNarrowing()
-console.log('references: 16 tests OK')
+console.log('references: 17 tests OK')

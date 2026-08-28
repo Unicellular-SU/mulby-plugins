@@ -134,15 +134,31 @@ function safeVideoCapabilities(provider: ProviderConfig | null | undefined): Vid
     nativeAudio: capabilities.nativeAudio,
     aspects: clippedStrings(capabilities.aspects),
     durations: positiveNumbers(capabilities.durations),
-    resolutions: clippedStrings(capabilities.resolutions)
+    resolutions: clippedStrings(capabilities.resolutions),
+    referenceInputs: {
+      images: {
+        max: capabilities.referenceInputs.images.max,
+        modes: capabilities.referenceInputs.images.modes,
+        transport: capabilities.referenceInputs.images.transport
+      },
+      videos: {
+        max: capabilities.referenceInputs.videos.max,
+        transport: 'url'
+      },
+      mixed: capabilities.referenceInputs.mixed
+    }
   }
 }
 
 function nodeSnapshot(kind: CardKind, videoCapabilities?: VideoProviderCapabilities): AgentCapabilityNodeV1 {
   // 能力快照声明 Provider 可达到的最大图片输入数；实际卡片仍按当前 refMode 由注册表收窄。
+  const hasAdvancedReferences = !!videoCapabilities?.referenceInputs?.videos?.max
+    || (videoCapabilities?.referenceInputs?.images?.max || 0) > 2
   const spec = resolveNodeSpec(kind, {
     videoCapabilities,
-    params: kind === 'video' && videoCapabilities?.lastFrame ? { refMode: 'keyframe' } : undefined
+    params: kind === 'video'
+      ? { refMode: hasAdvancedReferences ? 'auto' : videoCapabilities?.lastFrame ? 'keyframe' : 'omni' }
+      : undefined
   })
   return {
     kind,
@@ -268,4 +284,3 @@ export function buildAgentCapabilitySnapshot(input: AgentCapabilitySnapshotInput
   const bytes = agentCapabilitySnapshotBytes(snapshot)
   return { snapshot, hash: agentCapabilitySnapshotHash(snapshot), bytes }
 }
-

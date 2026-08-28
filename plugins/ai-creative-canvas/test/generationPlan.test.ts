@@ -101,8 +101,44 @@ async function testWorkflowCountsContinuityReferencesAndReusesInputs() {
   assert.ok(reusedPlan.issues.some((issue) => issue.message.includes('复用已有素材 1 个')))
 }
 
+async function testVideoReferenceCapabilityPreflight() {
+  reset()
+  const multiProvider: ProviderConfig = {
+    ...provider,
+    bodyTemplate: '{"prompt":"{prompt}"{?images},"images":{$images}{/images}{?videos},"videos":{$videos}{/videos}}',
+    capabilities: {
+      textToVideo: true,
+      imageToVideo: true,
+      lastFrame: true,
+      referenceInputs: {
+        images: { max: 9, modes: ['single', 'keyframes', 'multi'], transport: 'either' },
+        videos: { max: 3, transport: 'url' },
+        mixed: true
+      },
+      aspects: ['16:9'],
+      durations: [5, 10]
+    }
+  }
+  useProviders.setState({ providers: [multiProvider], activeVideoId: multiProvider.id })
+  const graph = useGraph.getState()
+  const remoteId = graph.addCard('video', { x: 0, y: 0 }, {
+    prompt: '沿用参考片段的镜头节奏',
+    assets: [{ id: 'remote', kind: 'video', url: 'https://cdn.test/reference.mp4', mime: 'video/mp4', name: 'reference.mp4' }]
+  })
+  const remotePlan = await buildCardGenerationPlan([remoteId])
+  assert.equal(remotePlan.issues.some((issue) => issue.level === 'error'), false, '公开参考视频在 Provider 上限内应通过预检')
+
+  const localId = graph.addCard('video', { x: 300, y: 0 }, {
+    prompt: '沿用本地片段',
+    assets: [{ id: 'local', kind: 'video', url: 'file:///local.mp4', localPath: '/local.mp4', mime: 'video/mp4', name: 'local.mp4' }]
+  })
+  const localPlan = await buildCardGenerationPlan([localId])
+  assert.ok(localPlan.issues.some((issue) => issue.level === 'error' && issue.message.includes('公开 http(s) URL')))
+}
+
 await testCapabilityConflictAndKnownVideoCost()
 await testUnknownImageCostAndBatchThreshold()
 await testWorkflowSeparatesGeneratedAndEditedDuration()
 await testWorkflowCountsContinuityReferencesAndReusesInputs()
-console.log('generation plan: 4 tests OK')
+await testVideoReferenceCapabilityPreflight()
+console.log('generation plan: 5 tests OK')

@@ -178,6 +178,10 @@ export function ProviderSettings() {
     if (!draft || !capabilities) return
     updateDraft({ capabilities: { ...capabilities, ...patch } })
   }
+  const updateReferenceInputs = (patch: Partial<NonNullable<VideoProviderCapabilities['referenceInputs']>>) => {
+    if (!capabilities) return
+    updateCapabilities({ referenceInputs: { ...capabilities.referenceInputs, ...patch } })
+  }
 
   const addPreset = (factory: () => ProviderConfig) => {
     const provider = factory()
@@ -400,9 +404,36 @@ export function ProviderSettings() {
                                   className="mt-0.5"
                                   checked={!!capabilities[key]}
                                   disabled={key === 'lastFrame' && !capabilities.imageToVideo}
-                                  onChange={(event) => updateCapabilities(key === 'imageToVideo' && !event.target.checked
-                                    ? { imageToVideo: false, lastFrame: false }
-                                    : { [key]: event.target.checked })}
+                                  onChange={(event) => {
+                                    const checked = event.target.checked
+                                    if (key === 'imageToVideo') {
+                                      updateCapabilities({
+                                        imageToVideo: checked,
+                                        lastFrame: checked ? capabilities.lastFrame : false,
+                                        referenceInputs: {
+                                          ...capabilities.referenceInputs,
+                                          mixed: checked ? capabilities.referenceInputs.mixed : false,
+                                          images: checked
+                                            ? { ...capabilities.referenceInputs.images, max: Math.max(1, capabilities.referenceInputs.images.max), modes: capabilities.referenceInputs.images.modes.length ? capabilities.referenceInputs.images.modes : ['single'] }
+                                            : { ...capabilities.referenceInputs.images, max: 0, modes: [] }
+                                        }
+                                      })
+                                    } else if (key === 'lastFrame') {
+                                      updateCapabilities({
+                                        lastFrame: checked,
+                                        referenceInputs: {
+                                          ...capabilities.referenceInputs,
+                                          images: {
+                                            ...capabilities.referenceInputs.images,
+                                            max: checked ? Math.max(2, capabilities.referenceInputs.images.max) : capabilities.referenceInputs.images.max,
+                                            modes: checked
+                                              ? [...new Set([...capabilities.referenceInputs.images.modes, 'keyframes' as const])]
+                                              : capabilities.referenceInputs.images.modes.filter((mode) => mode !== 'keyframes')
+                                          }
+                                        }
+                                      })
+                                    } else updateCapabilities({ [key]: checked })
+                                  }}
                                 />
                                 <span><span className="block text-xs font-medium">{label}</span><span className="block text-[10px] opacity-50 mt-0.5">{description}</span></span>
                               </label>
@@ -412,6 +443,60 @@ export function ProviderSettings() {
                             <Row label="支持比例" hint="逗号分隔；留空时显示通用比例"><input className="ace-input" value={(capabilities.aspects || []).join(', ')} onChange={(event) => updateCapabilities({ aspects: csvStrings(event.target.value) })} placeholder="16:9, 9:16, 1:1" /></Row>
                             <Row label="支持时长（秒）" hint="逗号分隔；节点滑块会自动吸附"><input className="ace-input" value={(capabilities.durations || []).join(', ')} onChange={(event) => updateCapabilities({ durations: csvNumbers(event.target.value) })} placeholder="5, 10" /></Row>
                             <Row label="支持分辨率" hint="填写后视频节点才显示分辨率选项"><input className="ace-input" value={(capabilities.resolutions || []).join(', ')} onChange={(event) => updateCapabilities({ resolutions: csvStrings(event.target.value) })} placeholder="720p, 1080p" /></Row>
+                          </div>
+                          <div className="grid grid-cols-4 gap-3 mt-3">
+                            <Row label="最多参考图" hint="0 表示不支持；多图模板请使用 {$images}">
+                              <input
+                                className="ace-input"
+                                type="number"
+                                min={0}
+                                max={99}
+                                value={capabilities.referenceInputs.images.max}
+                                onChange={(event) => {
+                                  const max = Math.max(0, Math.min(99, Number(event.target.value) || 0))
+                                  updateCapabilities({
+                                    imageToVideo: max > 0,
+                                    lastFrame: max > 1,
+                                    referenceInputs: {
+                                      ...capabilities.referenceInputs,
+                                      mixed: max > 0 && capabilities.referenceInputs.videos.max > 0 ? capabilities.referenceInputs.mixed : false,
+                                      images: {
+                                        ...capabilities.referenceInputs.images,
+                                        max,
+                                        modes: max > 2 ? ['single', 'keyframes', 'multi'] : max > 1 ? ['single', 'keyframes'] : max ? ['single'] : []
+                                      }
+                                    }
+                                  })
+                                }}
+                              />
+                            </Row>
+                            <Row label="图片传输">
+                              <select className="ace-input" value={capabilities.referenceInputs.images.transport} onChange={(event) => updateReferenceInputs({ images: { ...capabilities.referenceInputs.images, transport: event.target.value as 'dataurl' | 'url' | 'either' } })}>
+                                <option value="either">URL / DataURL</option>
+                                <option value="url">仅公网 URL</option>
+                                <option value="dataurl">仅 DataURL</option>
+                              </select>
+                            </Row>
+                            <Row label="最多参考视频" hint="当前仅支持公开 URL；模板使用 {$videos}">
+                              <input
+                                className="ace-input"
+                                type="number"
+                                min={0}
+                                max={99}
+                                value={capabilities.referenceInputs.videos.max}
+                                onChange={(event) => {
+                                  const max = Math.max(0, Math.min(99, Number(event.target.value) || 0))
+                                  updateReferenceInputs({
+                                    videos: { max, transport: 'url' },
+                                    mixed: max > 0 && capabilities.referenceInputs.images.max > 0 ? capabilities.referenceInputs.mixed : false
+                                  })
+                                }}
+                              />
+                            </Row>
+                            <label className="flex items-center gap-2 self-end h-8 rounded-md border px-2.5 text-[11px]" style={{ borderColor: 'var(--ace-border)' }}>
+                              <input type="checkbox" checked={capabilities.referenceInputs.mixed} disabled={!capabilities.referenceInputs.images.max || !capabilities.referenceInputs.videos.max} onChange={(event) => updateReferenceInputs({ mixed: event.target.checked })} />
+                              图/视频混合
+                            </label>
                           </div>
                         </section>
                       </>
@@ -456,7 +541,7 @@ export function ProviderSettings() {
                           <Row label="请求超时 ms"><input className="ace-input" type="number" min="1000" value={draft.timeoutMs || 600000} onChange={(event) => updateDraft({ timeoutMs: Number(event.target.value) || 600000 })} /></Row>
                           <Row label="提交重试次数" hint="无幂等保证或可能重复计费时请设为 0"><input className="ace-input" type="number" min="0" max="5" step="1" value={draft.submitRetries ?? 2} onChange={(event) => updateDraft({ submitRetries: Number(event.target.value) })} /></Row>
                         </div>
-                        <Row label="请求体模板" hint="支持 {prompt}、{model}、{imageUrl}、{lastImageUrl}、{duration}、{aspect} 和条件块 {?x}…{/x}"><textarea className="ace-input resize-y font-mono text-[10px] leading-relaxed" rows={8} value={draft.bodyTemplate || ''} onChange={(event) => updateDraft({ bodyTemplate: event.target.value })} /></Row>
+                        <Row label="请求体模板" hint="文本占位：{prompt}/{model}/{imageUrl}/{lastImageUrl}；JSON 数组：{$images}/{$videos}；条件块：{?x}…{/x}"><textarea className="ace-input resize-y font-mono text-[10px] leading-relaxed" rows={8} value={draft.bodyTemplate || ''} onChange={(event) => updateDraft({ bodyTemplate: event.target.value })} /></Row>
                         <div className="grid grid-cols-3 gap-3">
                           <Row label="图床上传 URL"><input className="ace-input" value={draft.uploadUrl || ''} onChange={(event) => updateDraft({ uploadUrl: event.target.value })} /></Row>
                           <Row label="上传字段"><input className="ace-input" value={draft.uploadField || ''} onChange={(event) => updateDraft({ uploadField: event.target.value })} /></Row>

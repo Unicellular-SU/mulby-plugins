@@ -139,7 +139,7 @@ function testSnapshotContractAndProviderResolution() {
   })
   const snapshot = result.snapshot
   assert.equal(snapshot.version, 1)
-  assert.equal(snapshot.registryVersion, '1.1.0')
+  assert.equal(snapshot.registryVersion, '1.2.0')
   assert.deepEqual(snapshot.nodes.map((node) => node.kind), ['text', 'image', 'pano', 'video', 'audio', 'source', 'group'])
   assert.equal(snapshot.nodes.some((node) => node.kind === 'note'), false)
   assert.deepEqual(snapshot.nodes.find((node) => node.kind === 'group')?.agentActions, ['organize', 'inspect-output'])
@@ -160,7 +160,12 @@ function testSnapshotContractAndProviderResolution() {
     nativeAudio: false,
     aspects: ['1:1', '16:9'],
     durations: [5, 10],
-    resolutions: ['720p', '1080p']
+    resolutions: ['720p', '1080p'],
+    referenceInputs: {
+      images: { max: 2, modes: ['single', 'keyframes'], transport: 'either' },
+      videos: { max: 0, transport: 'url' },
+      mixed: false
+    }
   })
   assert.equal(providers.video.available, true)
   assert.equal(providers.video.modelId, 'video-pro')

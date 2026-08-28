@@ -189,8 +189,8 @@ async function testSeedance25TemplateRequestAndPoll() {
   const provider = { ...template.make(), pollIntervalMs: 1 }
   const result = await runVideoJob(provider, 'SECRET', {
     prompt: '一只橘猫在花园里行走',
-    imageDataUrl: 'data:image/png;base64,FIRST',
-    lastImageDataUrl: 'data:image/png;base64,LAST',
+    imageDataUrls: ['data:image/png;base64,FIRST', 'data:image/png;base64,SECOND', 'data:image/png;base64,THIRD'],
+    videoUrls: ['https://assets.test/reference-1.mp4', 'https://assets.test/reference-2.mp4'],
     params: { resolution: '1080p', aspect: '9:16', duration: 30 }
   })
   assert.equal(result.url, 'https://raydu.liekumall.com/results/seedance25.mp4')
@@ -199,7 +199,8 @@ async function testSeedance25TemplateRequestAndPoll() {
   assert.deepEqual(submitRequest.body, {
     model: 'seedance25',
     prompt: '一只橘猫在花园里行走',
-    images: ['data:image/png;base64,FIRST', 'data:image/png;base64,LAST'],
+    images: ['data:image/png;base64,FIRST', 'data:image/png;base64,SECOND', 'data:image/png;base64,THIRD'],
+    videos: ['https://assets.test/reference-1.mp4', 'https://assets.test/reference-2.mp4'],
     settings: {
       resolution: '1080p',
       ratio: '9:16',

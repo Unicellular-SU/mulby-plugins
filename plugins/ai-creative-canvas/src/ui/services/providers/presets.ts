@@ -73,13 +73,14 @@ const toapis = (over: Partial<ProviderConfig>): ProviderConfig =>
     ...over
   })
 
-// 占位说明：{prompt} {model} 必有；{imageUrl}/{lastImageUrl} 为上传后的公网图 URL（配合首帧/尾帧开关）；
-// {aspect}/{duration} 取自节点参数；{?x}…{/x} 仅在 x 非空时出现；{?noImage} 仅文生视频时出现。
+// 占位说明：{prompt} {model} 必有；{imageUrl}/{lastImageUrl} 保持旧 Provider 兼容；
+// {$images}/{$videos} 会安全写入 JSON 数组；{aspect}/{duration} 取自节点参数；
+// {?x}…{/x} 仅在 x 非空时出现；{?noImage} 仅文生视频时出现。
 export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
   {
     id: 'raydu-seedance25',
     label: 'Raydu · Seedance 2.5（异步直连）',
-    hint: 'seedance25：支持文生视频、单图参考与首尾帧两图模式，图片可用 URL/DataURL；画幅 16:9/9:16/1:1/4:3/3:4，时长 5/10/15/20/30 秒，默认开启原生音频。',
+    hint: 'seedance25：支持文生视频、1～9 张图片、1～3 条公开视频 URL，以及图/视频混合参考；素材数量由服务端自动推断模式。',
     make: () =>
       base({
         label: 'Raydu Seedance 2.5',
@@ -102,16 +103,21 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
           nativeAudio: true,
           aspects: ['16:9', '9:16', '1:1', '4:3', '3:4'],
           durations: [5, 10, 15, 20, 30],
-          resolutions: ['720p', '1080p']
+          resolutions: ['720p', '1080p'],
+          referenceInputs: {
+            images: { max: 9, modes: ['single', 'keyframes', 'multi'], transport: 'either' },
+            videos: { max: 3, transport: 'url' },
+            mixed: true
+          }
         },
         bodyTemplate:
-          '{"model":"{model}","prompt":"{prompt}"{?imageUrl},"images":["{imageUrl}"{?lastImageUrl},"{lastImageUrl}"{/lastImageUrl}]{/imageUrl},"settings":{"resolution":"{resolution}","ratio":"{aspect}","duration":{duration},"enableSound":"on"}}'
+          '{"model":"{model}","prompt":"{prompt}"{?images},"images":{$images}{/images}{?videos},"videos":{$videos}{/videos},"settings":{"resolution":"{resolution}","ratio":"{aspect}","duration":{duration},"enableSound":"on"}}'
       })
   },
   {
     id: 'raydu-seedance25-sync',
     label: 'Raydu · Seedance 2.5（同步直连）',
-    hint: '同步等待 2～6 分钟后直接返回视频；客户端超时 720 秒，服务端等待上限 600 秒。若返回 504，请改用异步直连模板。支持文生视频、单图参考与首尾帧两图模式。',
+    hint: '同步等待 2～6 分钟后直接返回视频；支持 1～9 张图片、1～3 条公开视频 URL 及混合参考。若返回 504，请改用异步直连模板。',
     make: () =>
       base({
         label: 'Raydu Seedance 2.5（同步）',
@@ -130,10 +136,15 @@ export const PROVIDER_TEMPLATES: ProviderTemplate[] = [
           nativeAudio: true,
           aspects: ['16:9', '9:16', '1:1', '4:3', '3:4'],
           durations: [5, 10, 15, 20, 30],
-          resolutions: ['720p', '1080p']
+          resolutions: ['720p', '1080p'],
+          referenceInputs: {
+            images: { max: 9, modes: ['single', 'keyframes', 'multi'], transport: 'either' },
+            videos: { max: 3, transport: 'url' },
+            mixed: true
+          }
         },
         bodyTemplate:
-          '{"model":"{model}","prompt":"{prompt}"{?imageUrl},"images":["{imageUrl}"{?lastImageUrl},"{lastImageUrl}"{/lastImageUrl}]{/imageUrl},"settings":{"resolution":"{resolution}","ratio":"{aspect}","duration":{duration},"enableSound":"on"},"timeoutMs":600000}'
+          '{"model":"{model}","prompt":"{prompt}"{?images},"images":{$images}{/images}{?videos},"videos":{$videos}{/videos},"settings":{"resolution":"{resolution}","ratio":"{aspect}","duration":{duration},"enableSound":"on"},"timeoutMs":600000}'
       })
   },
 

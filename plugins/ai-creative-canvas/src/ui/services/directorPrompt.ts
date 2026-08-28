@@ -32,6 +32,7 @@ export interface DirectorPromptContext {
   hasExplicitMentions: boolean
   textInputs: { label: string; text: string }[]
   imageInputs: { label: string; role: 'reference' | 'first-frame' | 'last-frame'; material: Material }[]
+  videoInputs: { label: string; url: string }[]
   style: { id: string | null; label: string; prompt: string }
   params: {
     camera: string
@@ -67,6 +68,7 @@ export interface DirectorPromptDraft {
     styleLabel: string
     providerLabel: string
     usedVisualImages: number
+    videoCount?: number
   }
   mode: 'next-generation'
 }
@@ -124,7 +126,12 @@ export function buildDirectorPromptContext(
   if (card.kind !== 'video') throw new Error('导演增强目前仅支持视频卡片')
   const materials = selectedGenMaterials(card, board, undefined, project)
   const resolved = resolveGenerationPrompt(card, board, 'media', project)
-  const imageMaterials = materials.filter((material) => material.kind === 'image').slice(0, 2)
+  const capabilities = resolveVideoCapabilities(provider)
+  const imageLimit = provider ? capabilities.referenceInputs.images.max : 2
+  const imageMaterials = materials.filter((material) => material.kind === 'image').slice(0, imageLimit)
+  const videoInputs = materials
+    .filter((material) => material.kind === 'video')
+    .map((material) => ({ label: material.label, url: material.assetUrl || '' }))
   const refMode = String(card.params?.refMode || 'omni')
   const imageInputs = imageMaterials.map((material, index) => ({
     label: material.label,
@@ -134,7 +141,6 @@ export function buildDirectorPromptContext(
   const styleId = board.stylePackId ?? project.stylePackId ?? null
   const pack = getStylePack(styleId)
   const stylePrompt = videoStyleTag(styleId, board.style ?? project.style)
-  const capabilities = resolveVideoCapabilities(provider)
   const durationModelId = card.modelId || provider?.model
   const params = {
     camera: String(card.params?.camera || ''),
@@ -170,6 +176,7 @@ export function buildDirectorPromptContext(
     hasExplicitMentions: resolved.hasExplicitMentions,
     textInputs: resolved.inputs.texts.map((item) => ({ label: item.label, text: item.text })),
     imageInputs,
+    videoInputs,
     style: { id: styleId, label: pack?.label || (stylePrompt ? '自定义风格' : '无'), prompt: stylePrompt },
     params,
     provider: providerInfo,
@@ -240,10 +247,13 @@ export function compileDirectorPrompt(
     !rewritten.hasExplicitMentions || missingDirectorMentionTokens(card.prompt || '', localPrompt).length > 0
   )
   const effective = lostExplicitMention ? context.resolvedPrompt : rewritten.text
-  const refs = context.imageInputs.length
+  const imageRefs = context.imageInputs.length
     ? context.params.refMode === 'keyframe' && context.imageInputs.length > 1
       ? '参考约束：第一张图是首帧，第二张图是尾帧，保持主体身份、核心结构与时空连续性，中间变化必须可解释'
       : '参考约束：保持参考图中主体身份、关键外观和起始空间关系，从现有画面自然启动运动'
+    : ''
+  const videoRefs = context.videoInputs.length
+    ? `视频参考约束：沿用 ${context.videoInputs.map((item) => `「${item.label}」`).join('、')} 的主体运动、节奏或镜头语言，不复制无关内容`
     : ''
   const explicitParams = joinLabeled('生成约束', [
     context.params.aspect && `画幅 ${context.params.aspect}`,
@@ -265,7 +275,8 @@ export function compileDirectorPrompt(
     joinLabeled('色彩命题', [plan.colorThesis]),
     joinLabeled('成像限制', plan.opticalConstraints),
     context.provider.nativeAudio ? joinLabeled('声音', [plan.audioDesign]) : '',
-    refs,
+    imageRefs,
+    videoRefs,
     context.style.prompt ? `风格约束：${context.style.prompt}` : '',
     explicitParams,
     joinLabeled('避免', plan.avoid)
@@ -285,6 +296,7 @@ function modelContext(context: DirectorPromptContext): Record<string, unknown> {
     hasExplicitMentions: context.hasExplicitMentions,
     upstreamTexts: context.textInputs.map((item) => ({ label: item.label, text: clip(item.text, 5000) })),
     referenceImages: context.imageInputs.map((item) => ({ label: item.label, role: item.role })),
+    referenceVideos: context.videoInputs.map((item) => ({ label: item.label, url: item.url })),
     style: context.style,
     params: context.params,
     provider: context.provider
@@ -298,7 +310,7 @@ export async function generateDirectorPrompt(
   provider?: ProviderConfig | null
 ): Promise<DirectorPromptDraft> {
   const context = buildDirectorPromptContext(card, board, project, provider)
-  if (!context.resolvedPrompt.trim() && !context.imageInputs.length) throw new Error('请先输入视频内容、连接上游文本或添加参考图')
+  if (!context.resolvedPrompt.trim() && !context.imageInputs.length && !context.videoInputs.length) throw new Error('请先输入视频内容、连接上游文本或添加参考素材')
   const imageContents: any[] = []
   for (const image of context.imageInputs) {
     try {
@@ -318,7 +330,7 @@ export async function generateDirectorPrompt(
     '先判断可见行动、人物与空间的压力关系、观众位置和视线路径，再决定机位、焦段与运镜。',
     '视频必须有可解释的时间变化：分开主体运动、环境运动和摄影机运动，只保留一个主导运动，避免所有东西同时激烈运动。',
     '光线必须有场景内的物理来源；色彩必须服务叙事；使用适量的真实光学限制，避免油亮、过度 HDR、每处同样清晰和无意义烟雾。',
-    '参考图是内容和连续性约束：保护主体身份、外观、关键结构与起始空间关系，不要把它只改写成一串形容词。',
+    '参考图是内容和连续性约束：保护主体身份、外观、关键结构与起始空间关系，不要把它只改写成一串形容词。参考视频标签描述需要沿用的运动、节奏或镜头语言。',
     'localPrompt 只写适合放回“本节点补充要求”的内容，不要复制上游文本或风格包原文。如原始 localPrompt 含 @素材 token，必须原样保留每个 token，不得改名或删除。',
     '只输出合法 JSON，不要 Markdown、解释或引号包裹。'
   ].join('\n')
@@ -367,7 +379,8 @@ export async function generateDirectorPrompt(
       imageLabels: context.imageInputs.map((item) => item.label),
       styleLabel: context.style.label,
       providerLabel: context.provider.label,
-      usedVisualImages: imageContents.length
+      usedVisualImages: imageContents.length,
+      videoCount: context.videoInputs.length
     },
     mode: 'next-generation'
   }

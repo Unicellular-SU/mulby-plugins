@@ -1,7 +1,7 @@
 import type { ProviderConfig } from './types'
 import { toFileUrl } from '../media'
 import { PLUGIN_ID } from '../persistence'
-import { renderProviderTemplate, validateProviderConfig } from './config'
+import { renderProviderTemplate, resolveVideoCapabilities, validateProviderConfig, type ProviderTemplateValue } from './config'
 
 function http() {
   return window.mulby.http
@@ -73,10 +73,36 @@ async function submitWithRetry(url: string, headers: any, body: any, timeoutMs: 
 
 export interface VideoReq {
   prompt: string
+  /** 多图输入，按节点素材条中的显式顺序发送。 */
+  imageDataUrls?: string[]
+  /** 仅接受公开 http(s) URL；本地视频由生成预检提前拒绝。 */
+  videoUrls?: string[]
+  /** 旧调用兼容别名；新调用优先使用 imageDataUrls。 */
   imageDataUrl?: string
   lastImageDataUrl?: string // 首帧/尾帧模式的尾帧
   model?: string // 节点级模型覆盖（优先于 cfg.model）
   params?: Record<string, unknown>
+}
+
+async function prepareImageUrl(cfg: ProviderConfig, key: string, dataUrl: string): Promise<string> {
+  const transport = resolveVideoCapabilities(cfg).referenceInputs.images.transport
+  if (/^https?:\/\//i.test(dataUrl) || !cfg.uploadUrl || transport === 'dataurl') return dataUrl
+  const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl
+  const response = (await host().call(PLUGIN_ID, 'uploadImageToHost', {
+    uploadUrl: cfg.uploadUrl,
+    apiKey: key,
+    base64: b64,
+    field: cfg.uploadField,
+    urlPath: cfg.uploadUrlPath
+  })) as { data?: { url?: string; error?: string } }
+  const url = response?.data?.url
+  if (!url) throw new Error('图片上传失败：' + (response?.data?.error || '检查 uploadUrl'))
+  return url
+}
+
+function requestImageDataUrls(req: VideoReq): string[] {
+  if (req.imageDataUrls?.length) return req.imageDataUrls.filter(Boolean)
+  return [req.imageDataUrl, req.lastImageDataUrl].filter((value): value is string => !!value)
 }
 
 // 仅轮询模板型(pollUrl/{taskId})任务（不提交）——供首次提交后轮询 + 断点续跑复用；返回结果 URL
@@ -155,33 +181,17 @@ export async function resumeVideoJob(cfg: ProviderConfig, key: string, taskId: s
 // 声明式模板路径：bodyTemplate + submitUrl/pollUrl/taskIdPath/statusField/videoUrlPath。
 // 仅提交、拿到 url/taskId 即返回（轮询交给 resumeVideoJob，二者同一 pollTaskTemplate 路径）。
 async function submitViaTemplate(cfg: ProviderConfig, key: string, req: VideoReq, onProgress?: (p: number) => void, onTask?: (taskId: string) => void): Promise<{ url?: string; taskId?: string }> {
-  let imageUrl: string | undefined
-  if (req.imageDataUrl) {
-    if (cfg.uploadUrl) {
-      const b64 = req.imageDataUrl.includes(',') ? req.imageDataUrl.split(',')[1] : req.imageDataUrl
-      const r = (await host().call(PLUGIN_ID, 'uploadImageToHost', { uploadUrl: cfg.uploadUrl, apiKey: key, base64: b64, field: cfg.uploadField, urlPath: cfg.uploadUrlPath })) as { data?: { url?: string; error?: string } }
-      const u = r?.data?.url
-      if (!u) throw new Error('图片上传失败：' + (r?.data?.error || '检查 uploadUrl'))
-      imageUrl = u
-    } else {
-      imageUrl = req.imageDataUrl
-    }
-  }
-  let lastImageUrl: string | undefined
-  if (req.lastImageDataUrl) {
-    if (cfg.uploadUrl) {
-      const b64 = req.lastImageDataUrl.includes(',') ? req.lastImageDataUrl.split(',')[1] : req.lastImageDataUrl
-      const r = (await host().call(PLUGIN_ID, 'uploadImageToHost', { uploadUrl: cfg.uploadUrl, apiKey: key, base64: b64, field: cfg.uploadField, urlPath: cfg.uploadUrlPath })) as { data?: { url?: string; error?: string } }
-      lastImageUrl = r?.data?.url || undefined
-    } else {
-      lastImageUrl = req.lastImageDataUrl
-    }
-  }
-  const vars: Record<string, string | undefined> = {
+  const images = await Promise.all(requestImageDataUrls(req).map((dataUrl) => prepareImageUrl(cfg, key, dataUrl)))
+  const videos = (req.videoUrls || []).filter(Boolean)
+  const imageUrl = images[0]
+  const lastImageUrl = images[1]
+  const vars: Record<string, ProviderTemplateValue> = {
     prompt: req.prompt,
     model: req.model || cfg.model,
     imageUrl,
     lastImageUrl,
+    images: images.length ? images : undefined,
+    videos: videos.length ? videos : undefined,
     noImage: imageUrl ? undefined : '1' // 用于「仅文生视频才出现」的字段，如 {?noImage}"aspect_ratio":…{/noImage}
   }
   if (req.params) for (const [k, v] of Object.entries(req.params)) if (v != null) vars[k] = String(v)
@@ -218,12 +228,13 @@ async function submitDefault(cfg: ProviderConfig, key: string, req: VideoReq, on
   if (req.model || cfg.model) body.model = req.model || cfg.model
   setPath(body, cfg.promptField || 'prompt', req.prompt)
 
-  if (req.imageDataUrl && cfg.imageField && cfg.imageMode && cfg.imageMode !== 'none') {
+  const firstImageDataUrl = requestImageDataUrls(req)[0]
+  if (firstImageDataUrl && cfg.imageField && cfg.imageMode && cfg.imageMode !== 'none') {
     if (cfg.imageMode === 'dataurl') {
-      setPath(body, cfg.imageField, req.imageDataUrl)
+      setPath(body, cfg.imageField, firstImageDataUrl)
     } else {
       // 上传图床换公网 URL（后端 multipart）
-      const b64 = req.imageDataUrl.includes(',') ? req.imageDataUrl.split(',')[1] : req.imageDataUrl
+      const b64 = firstImageDataUrl.includes(',') ? firstImageDataUrl.split(',')[1] : firstImageDataUrl
       const r = (await host().call(PLUGIN_ID, 'uploadImageToHost', {
         uploadUrl: cfg.uploadUrl,
         apiKey: key,

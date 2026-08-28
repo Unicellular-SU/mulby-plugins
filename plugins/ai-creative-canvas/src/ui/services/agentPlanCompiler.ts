@@ -52,6 +52,18 @@ function enumMatch(param: NodeParamSpec, value: unknown): unknown {
 function videoCapabilities(snapshot: AgentCapabilitySnapshotV1): VideoProviderCapabilities | undefined {
   const raw = snapshot.providers.find((provider) => provider.kind === 'video')?.capabilities
   if (!raw) return undefined
+  const referenceInputs = raw.referenceInputs && typeof raw.referenceInputs === 'object' && !Array.isArray(raw.referenceInputs)
+    ? raw.referenceInputs as Record<string, unknown>
+    : undefined
+  const rawImages = referenceInputs?.images && typeof referenceInputs.images === 'object' && !Array.isArray(referenceInputs.images)
+    ? referenceInputs.images as Record<string, unknown>
+    : undefined
+  const rawVideos = referenceInputs?.videos && typeof referenceInputs.videos === 'object' && !Array.isArray(referenceInputs.videos)
+    ? referenceInputs.videos as Record<string, unknown>
+    : undefined
+  const imageModes = Array.isArray(rawImages?.modes)
+    ? rawImages.modes.filter((value): value is 'single' | 'keyframes' | 'multi' => value === 'single' || value === 'keyframes' || value === 'multi')
+    : undefined
   return {
     textToVideo: typeof raw.textToVideo === 'boolean' ? raw.textToVideo : undefined,
     imageToVideo: typeof raw.imageToVideo === 'boolean' ? raw.imageToVideo : undefined,
@@ -59,7 +71,19 @@ function videoCapabilities(snapshot: AgentCapabilitySnapshotV1): VideoProviderCa
     nativeAudio: typeof raw.nativeAudio === 'boolean' ? raw.nativeAudio : undefined,
     aspects: Array.isArray(raw.aspects) ? raw.aspects.map(String) : undefined,
     durations: Array.isArray(raw.durations) ? raw.durations.map(Number).filter((value) => Number.isFinite(value) && value > 0) : undefined,
-    resolutions: Array.isArray(raw.resolutions) ? raw.resolutions.map(String) : undefined
+    resolutions: Array.isArray(raw.resolutions) ? raw.resolutions.map(String) : undefined,
+    referenceInputs: referenceInputs ? {
+      images: {
+        max: Number.isInteger(rawImages?.max) ? Math.max(0, Number(rawImages?.max)) : undefined,
+        modes: imageModes,
+        transport: rawImages?.transport === 'url' || rawImages?.transport === 'dataurl' || rawImages?.transport === 'either' ? rawImages.transport : undefined
+      },
+      videos: {
+        max: Number.isInteger(rawVideos?.max) ? Math.max(0, Number(rawVideos?.max)) : undefined,
+        transport: 'url'
+      },
+      mixed: typeof referenceInputs.mixed === 'boolean' ? referenceInputs.mixed : undefined
+    } : undefined
   }
 }
 

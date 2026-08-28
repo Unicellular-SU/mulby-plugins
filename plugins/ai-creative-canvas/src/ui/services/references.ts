@@ -1,11 +1,19 @@
 import type { Board, Card, Material, MaterialKind, ProjectDoc } from '../types'
 import { acceptsMaterialKind, consumableMaterials, materialKindOfCard } from './nodeCapabilities'
+import type { ProviderConfig } from './providers/types'
 import { materialFromAnchor } from './semanticAssets'
 
 const KIND_LABEL: Record<MaterialKind, string> = { image: '图片', video: '视频', audio: '音频', text: '文本' }
 
 // 默认标题（未重命名）→ 这些用自动编号，重命名后用真实名称
 const DEFAULT_TITLES = new Set(['AI 图片', 'AI 全景', 'AI 视频', 'AI 文本', 'AI 音频', '素材', '分组'])
+
+function publicVideoSource(card: Card): string | undefined {
+  const direct = card.assetUrl
+  if (direct && /^https?:\/\//i.test(direct)) return direct
+  const generated = (card.meta as { videoGeneration?: { sourceUrl?: unknown } })?.videoGeneration?.sourceUrl
+  return typeof generated === 'string' && /^https?:\/\//i.test(generated) ? generated : undefined
+}
 
 // 汇总一个节点的素材：上游连线 + 显式引用 + 本节点上传；标签优先用节点真实名称，否则按 kind 自动编号
 export function buildMaterials(card: Card, board: Board, project?: ProjectDoc): Material[] {
@@ -57,6 +65,7 @@ export function buildMaterials(card: Card, board: Board, project?: ProjectDoc): 
     counters[k]++
     const t = (c.title || '').trim()
     const label = uniq(t && !DEFAULT_TITLES.has(t) ? t : `${KIND_LABEL[k]}${counters[k]}`)
+    const reusableVideoUrl = k === 'video' ? publicVideoSource(c) : undefined
     mats.push({
       matId: 'card:' + id,
       origin: edgeSet.has(id) ? 'edge' : 'card',
@@ -65,7 +74,7 @@ export function buildMaterials(card: Card, board: Board, project?: ProjectDoc): 
       thumbUrl: sourceMissing ? undefined : c.assetUrl || undefined,
       text: c.text || undefined,
       cardId: id,
-      assetUrl: sourceMissing ? undefined : c.assetUrl || undefined,
+      assetUrl: sourceMissing ? undefined : reusableVideoUrl || c.assetUrl || undefined,
       assetLocalPath: sourceMissing ? undefined : c.assetLocalPath || undefined,
       mime: c.mime || undefined,
       unavailable: !!sourceMissing
@@ -109,9 +118,16 @@ export interface GenImageInput {
   localPath?: string
   mime?: string
 }
+export interface GenVideoInput {
+  url?: string
+  localPath?: string
+  mime?: string
+  label: string
+}
 export interface GenInputs {
   texts: { label: string; text: string }[]
   images: GenImageInput[]
+  videos: GenVideoInput[]
 }
 
 export type GenerationPromptPurpose = 'media' | 'text' | 'speech'
@@ -137,14 +153,37 @@ function mentionedMaterials(prompt: string, mats: Material[]): Material[] {
 function inputsFromMaterials(selected: Material[]): GenInputs {
   const texts: { label: string; text: string }[] = []
   const images: GenImageInput[] = []
+  const videos: GenVideoInput[] = []
   for (const m of selected) {
     if (m.kind === 'text' && m.text?.trim()) texts.push({ label: m.label, text: m.text.trim() })
     else if (m.kind === 'image') {
       const url = m.assetUrl || m.thumbUrl
       if (url || m.assetLocalPath) images.push({ url: url || undefined, localPath: m.assetLocalPath, mime: m.mime })
+    } else if (m.kind === 'video') {
+      const url = m.assetUrl || m.thumbUrl
+      if (url || m.assetLocalPath) videos.push({ url: url || undefined, localPath: m.assetLocalPath, mime: m.mime, label: m.label })
     }
   }
-  return { texts, images }
+  return { texts, images, videos }
+}
+
+/** 视频节点的引用顺序独立持久化，避免连线/上传来源变化后破坏首尾帧和多参考语义。 */
+export function orderedGenerationMaterials(card: Card, materials: Material[]): Material[] {
+  if (card.kind !== 'video') return materials
+  const configured = Array.isArray(card.params?.referenceOrder)
+    ? card.params.referenceOrder.filter((value): value is string => typeof value === 'string')
+    : []
+  if (!configured.length) return materials
+  const positions = new Map(configured.map((id, index) => [id, index]))
+  return materials
+    .map((material, index) => ({ material, index, order: positions.get(material.matId) }))
+    .sort((left, right) => {
+      if (left.order == null && right.order == null) return left.index - right.index
+      if (left.order == null) return 1
+      if (right.order == null) return -1
+      return left.order - right.order
+    })
+    .map(({ material }) => material)
 }
 
 /** 连续性派生图只允许消费已解析的身份锚点图片，避免包装/风格/旧引用挤掉产品主图。 */
@@ -162,19 +201,19 @@ function continuityPreferredMaterials(card: Card, materials: Material[]): Materi
 }
 
 // 生成时的有效输入：若提示词 @了某些素材则只取这些（按其真实名称匹配），否则取全部
-export function resolveGenInputs(card: Card, board: Board, project?: ProjectDoc): GenInputs {
+export function resolveGenInputs(card: Card, board: Board, project?: ProjectDoc, provider?: ProviderConfig): GenInputs {
   const mats = buildMaterials(card, board, project)
-  const selected = selectedGenMaterials(card, board, mats)
+  const selected = selectedGenMaterials(card, board, mats, project, provider)
   return inputsFromMaterials(selected)
 }
 
 /** 本次生成将使用的素材（与 resolveGenInputs 同源） */
-export function selectedGenMaterials(card: Card, board: Board, mats?: Material[], project?: ProjectDoc): Material[] {
+export function selectedGenMaterials(card: Card, board: Board, mats?: Material[], project?: ProjectDoc, provider?: ProviderConfig): Material[] {
   const available = mats ?? buildMaterials(card, board, project)
-  const accepted = continuityPreferredMaterials(card, available.filter((material) => acceptsMaterialKind(card, material.kind) && isUsableMaterial(material)))
+  const accepted = orderedGenerationMaterials(card, continuityPreferredMaterials(card, available.filter((material) => acceptsMaterialKind(card, material.kind, provider) && isUsableMaterial(material))))
   const refd = mentionedMaterials(card.prompt || '', accepted)
   const picked = refd.length ? refd : accepted
-  return consumableMaterials(card, picked)
+  return consumableMaterials(card, picked, provider)
 }
 
 function formatTextInputs(texts: GenInputs['texts']): string {
@@ -192,14 +231,15 @@ export function resolveGenerationPrompt(
   card: Card,
   board: Board,
   purpose: GenerationPromptPurpose = 'media',
-  project?: ProjectDoc
+  project?: ProjectDoc,
+  provider?: ProviderConfig
 ): ResolvedGenerationPrompt {
   const mats = buildMaterials(card, board, project)
-  const accepted = mats.filter((material) => acceptsMaterialKind(card, material.kind) && isUsableMaterial(material))
-  const selectedPool = continuityPreferredMaterials(card, accepted)
+  const accepted = mats.filter((material) => acceptsMaterialKind(card, material.kind, provider) && isUsableMaterial(material))
+  const selectedPool = orderedGenerationMaterials(card, continuityPreferredMaterials(card, accepted))
   const mentioned = mentionedMaterials(card.prompt || '', selectedPool)
   const hasExplicitMentions = mentioned.length > 0
-  const selected = consumableMaterials(card, hasExplicitMentions ? mentioned : selectedPool)
+  const selected = consumableMaterials(card, hasExplicitMentions ? mentioned : selectedPool, provider)
   const inputs = inputsFromMaterials(selected)
   let local = (card.prompt || '').trim()
 
@@ -208,7 +248,13 @@ export function resolveGenerationPrompt(
 
   if (hasExplicitMentions) {
     for (const m of mentioned) {
-      const replacement = m.kind === 'text' ? (m.text || '').trim() : m.kind === 'image' ? `参考图「${m.label}」` : ''
+      const replacement = m.kind === 'text'
+        ? (m.text || '').trim()
+        : m.kind === 'image'
+          ? `参考图「${m.label}」`
+          : m.kind === 'video'
+            ? `参考视频「${m.label}」`
+            : ''
       local = local.replace(mentionPattern(m.label, 'g'), replacement)
     }
   }

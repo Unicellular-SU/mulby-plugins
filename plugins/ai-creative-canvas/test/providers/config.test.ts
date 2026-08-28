@@ -47,6 +47,16 @@ function testTemplateAndPreview() {
   const sensitive = buildProviderRequestPreview({ ...templateProvider, headers: { 'X-Api-Key': 'do-not-leak', 'X-Trace': 'safe' } }, false)
   assert.equal(sensitive.headers['X-Api-Key'], '••••••••')
   assert.equal(sensitive.headers['X-Trace'], 'safe')
+  const arrays = renderProviderTemplate('{"prompt":"{prompt}"{?images},"images":{$images}{/images}{?videos},"videos":{$videos}{/videos}}', {
+    prompt: 'safe',
+    images: ['https://example.test/a.png', 'data:image/png;base64,ABC'],
+    videos: ['https://example.test/v.mp4']
+  })
+  assert.deepEqual(JSON.parse(arrays), {
+    prompt: 'safe',
+    images: ['https://example.test/a.png', 'data:image/png;base64,ABC'],
+    videos: ['https://example.test/v.mp4']
+  })
 }
 
 function testValidation() {
@@ -90,6 +100,10 @@ function testSeedance25Preset() {
   assert.equal(provider.statusField, 'status')
   assert.equal(provider.videoUrlPath, 'result_url')
   assert.equal(provider.submitRetries, 0)
+  const capabilities = resolveVideoCapabilities(provider)
+  assert.equal(capabilities.referenceInputs.images.max, 9)
+  assert.equal(capabilities.referenceInputs.videos.max, 3)
+  assert.equal(capabilities.referenceInputs.mixed, true)
   assert.equal(validateProviderConfig(provider).filter((issue) => issue.level === 'error').length, 0)
 
   const preview = buildProviderRequestPreview(provider, true)
@@ -97,9 +111,10 @@ function testSeedance25Preset() {
     model: 'seedance25',
     prompt: '示例视频描述',
     images: [
-      'https://example.invalid/reference.png',
-      'https://example.invalid/last-frame.png'
+      'https://example.invalid/reference-1.png',
+      'https://example.invalid/reference-2.png'
     ],
+    videos: ['https://example.invalid/reference.mp4'],
     settings: {
       resolution: '720p',
       ratio: '16:9',
@@ -123,9 +138,10 @@ function testSeedance25Preset() {
     model: 'seedance25',
     prompt: '示例视频描述',
     images: [
-      'https://example.invalid/reference.png',
-      'https://example.invalid/last-frame.png'
+      'https://example.invalid/reference-1.png',
+      'https://example.invalid/reference-2.png'
     ],
+    videos: ['https://example.invalid/reference.mp4'],
     settings: {
       resolution: '720p',
       ratio: '16:9',

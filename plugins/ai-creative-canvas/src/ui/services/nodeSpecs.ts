@@ -1,7 +1,7 @@
 import type { CardKind, CardStatus, MaterialKind } from '../types'
 import type { ProviderConfig, VideoProviderCapabilities } from './providers/types'
 
-export const NODE_SPEC_REGISTRY_VERSION = '1.1.0'
+export const NODE_SPEC_REGISTRY_VERSION = '1.2.0'
 
 export type AgentNodeAction = 'reference' | 'create' | 'update-owned' | 'generate' | 'organize' | 'inspect-output'
 
@@ -298,8 +298,8 @@ export const NODE_SPECS: Record<CardKind, NodeSpec> = {
     version: 1,
     kind: 'video',
     label: '视频',
-    purpose: '生成文生视频、图生视频或带首尾关键帧约束的视频片段。',
-    suitableFor: ['广告镜头', '角色动作', '产品演示', '首尾帧转场'],
+    purpose: '生成文生视频、图生视频、参考视频驱动或带首尾关键帧约束的视频片段。',
+    suitableFor: ['广告镜头', '角色动作', '产品演示', '首尾帧转场', '多素材混合参考'],
     unsuitableFor: ['静态设定图', '纯文本分析'],
     agent: {
       actions: ['reference', 'create', 'generate', 'inspect-output'],
@@ -320,10 +320,19 @@ export const NODE_SPECS: Record<CardKind, NodeSpec> = {
         label: '画面参考',
         accepts: ['image'],
         min: 0,
-        max: 1,
+        max: 9,
         ordered: true,
-        orderMeaning: ['首帧或通用参考', '尾帧'],
-        description: '通用模式消费首张图；首尾帧模式按顺序消费两张图。'
+        orderMeaning: ['第 1 张', '第 2 张', '后续参考图'],
+        description: '按 Provider 能力消费有序图片；首尾帧模式只使用前两张。'
+      },
+      {
+        id: 'video-references',
+        label: '视频参考',
+        accepts: ['video'],
+        min: 0,
+        max: 3,
+        ordered: true,
+        description: '需要 Provider 显式声明支持；当前发送公开 http(s) 视频 URL。'
       }
     ],
     params: [
@@ -375,8 +384,8 @@ export const NODE_SPECS: Record<CardKind, NodeSpec> = {
         type: 'enum',
         required: false,
         default: 'omni',
-        enum: [{ value: 'omni', label: '参考·通用' }, { value: 'keyframe', label: '参考·首尾帧' }],
-        description: '决定图片输入作为通用参考，还是按首帧、尾帧解释。',
+        enum: [{ value: 'auto', label: '参考·自动识别' }, { value: 'omni', label: '参考·通用' }, { value: 'keyframe', label: '参考·首尾帧' }],
+        description: '自动模式按图片/视频数量让 Provider 推断；首尾帧模式只发送两张图片。',
         visibleWhen: { source: 'provider', key: 'imageToVideo', equals: true },
         control: { type: 'select', width: 100 }
       },
@@ -595,23 +604,46 @@ export function resolveNodeSpec(kind: CardKind, context: NodeSpecContext = {}): 
   const capabilities = context.videoCapabilities ?? context.provider?.capabilities
   const supportsImages = capabilities ? capabilities.imageToVideo !== false : true
   const supportsLastFrame = capabilities ? capabilities.lastFrame !== false : true
-  const refMode = context.params?.refMode === 'keyframe' ? 'keyframe' : 'omni'
+  const declaredImageMax = capabilities?.referenceInputs?.images?.max
+  const imageMax = capabilities
+    ? Math.max(0, Number.isInteger(declaredImageMax) ? Number(declaredImageMax) : supportsImages ? (supportsLastFrame ? 2 : 1) : 0)
+    : 9
+  const videoMax = capabilities ? Math.max(0, Number(capabilities.referenceInputs?.videos?.max) || 0) : 3
+  const modes = capabilities?.referenceInputs?.images?.modes || (supportsLastFrame ? ['single', 'keyframes'] : ['single'])
+  const supportsMulti = modes.includes('multi') || imageMax > 2
+  const refMode = context.params?.refMode === 'keyframe' ? 'keyframe' : context.params?.refMode === 'auto' ? 'auto' : 'omni'
 
-  if (!supportsImages) {
+  if (!supportsImages || imageMax === 0) {
     resolved.inputs = resolved.inputs.filter((input) => !input.accepts.includes('image'))
-    resolved.params = resolved.params.filter((param) => param.key !== 'refMode')
   } else {
     const imageInput = resolved.inputs.find((input) => input.id === 'image-references')
     if (imageInput) {
-      imageInput.max = supportsLastFrame && refMode === 'keyframe' ? 2 : 1
-      imageInput.orderMeaning = supportsLastFrame && refMode === 'keyframe' ? ['首帧', '尾帧'] : ['首帧或通用参考']
+      imageInput.max = supportsLastFrame && refMode === 'keyframe'
+        ? Math.min(2, imageMax)
+        : supportsMulti ? imageMax : Math.min(1, imageMax)
+      imageInput.orderMeaning = supportsLastFrame && refMode === 'keyframe'
+        ? ['首帧', '尾帧']
+        : supportsMulti ? ['第 1 张', '第 2 张', '后续参考图'] : ['首帧或通用参考']
     }
-    const referenceMode = resolved.params.find((param) => param.key === 'refMode')
-    if (referenceMode) {
-      referenceMode.enum = supportsLastFrame
-        ? [{ value: 'omni', label: '参考·通用' }, { value: 'keyframe', label: '参考·首尾帧' }]
-        : [{ value: 'omni', label: '参考·首帧' }]
-    }
+  }
+
+  const videoInput = resolved.inputs.find((input) => input.id === 'video-references')
+  if (!videoInput || videoMax === 0 || refMode === 'keyframe') {
+    resolved.inputs = resolved.inputs.filter((input) => input.id !== 'video-references')
+  } else {
+    videoInput.max = videoMax
+  }
+
+  const referenceMode = resolved.params.find((param) => param.key === 'refMode')
+  if (!referenceMode || (!imageMax && !videoMax)) {
+    resolved.params = resolved.params.filter((param) => param.key !== 'refMode')
+  } else {
+    referenceMode.default = supportsMulti || videoMax > 0 ? 'auto' : 'omni'
+    referenceMode.enum = [
+      ...(supportsMulti || videoMax > 0 ? [{ value: 'auto', label: '参考·自动识别' }] : []),
+      ...(imageMax ? [{ value: 'omni', label: supportsMulti ? '参考·多图' : '参考·首帧' }] : []),
+      ...(supportsLastFrame && imageMax > 1 ? [{ value: 'keyframe', label: '参考·首尾帧' }] : [])
+    ]
   }
 
   const aspect = resolved.params.find((param) => param.key === 'aspect')

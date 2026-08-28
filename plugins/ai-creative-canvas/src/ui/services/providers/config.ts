@@ -1,4 +1,4 @@
-import type { ProviderConfig, VideoProviderCapabilities } from './types'
+import type { ImageReferenceMode, ProviderConfig, VideoProviderCapabilities } from './types'
 
 export type ProviderIssueLevel = 'error' | 'warning'
 
@@ -29,15 +29,27 @@ function jsonEscape(value: string): string {
   return JSON.stringify(value).slice(1, -1)
 }
 
-/** 与真实提交链共用的条件模板渲染器，避免“预览能过、实际请求失败”。 */
-export function renderProviderTemplate(template: string, vars: Record<string, string | undefined>): string {
+export type ProviderTemplateValue = string | number | boolean | string[] | undefined
+
+function templateValuePresent(value: ProviderTemplateValue): boolean {
+  if (Array.isArray(value)) return value.length > 0
+  return value !== undefined && value !== '' && value !== false
+}
+
+/**
+ * 与真实提交链共用的条件模板渲染器。
+ * - {name}：作为 JSON 字符串内容转义（兼容旧模板）
+ * - {$name}：作为受控 JSON 值写入，供 images/videos 数组使用
+ */
+export function renderProviderTemplate(template: string, vars: Record<string, ProviderTemplateValue>): string {
   let output = template
   let previous: string
   const condition = /\{\?(\w+)\}([\s\S]*?)\{\/\1\}/g
   do {
     previous = output
-    output = output.replace(condition, (_match, key, inner) => (vars[key] ? inner : ''))
+    output = output.replace(condition, (_match, key, inner) => (templateValuePresent(vars[key]) ? inner : ''))
   } while (output !== previous)
+  output = output.replace(/\{\$(\w+)\}/g, (_match, key) => (vars[key] === undefined ? 'null' : JSON.stringify(vars[key])))
   return output.replace(/\{(\w+)\}/g, (_match, key) => (vars[key] != null ? jsonEscape(String(vars[key])) : ''))
 }
 
@@ -60,6 +72,18 @@ function uniqueStrings(values: unknown): string[] {
 function uniquePositiveNumbers(values: unknown): number[] {
   if (!Array.isArray(values)) return []
   return [...new Set(values.map(Number).filter((value) => Number.isFinite(value) && value > 0))].sort((a, b) => a - b)
+}
+
+function boundedCount(value: unknown, fallback: number, max: number): number {
+  const parsed = Number(value)
+  return Number.isInteger(parsed) && parsed >= 0 ? Math.min(parsed, max) : fallback
+}
+
+function imageReferenceModes(values: unknown, fallback: ImageReferenceMode[]): ImageReferenceMode[] {
+  if (!Array.isArray(values)) return fallback
+  const allowed = new Set<ImageReferenceMode>(['single', 'keyframes', 'multi'])
+  const modes = [...new Set(values.filter((value): value is ImageReferenceMode => allowed.has(value as ImageReferenceMode)))]
+  return modes.length ? modes : fallback
 }
 
 function isStringRecord(value: unknown): value is Record<string, string> {
@@ -98,20 +122,46 @@ export function isProviderConfigShape(value: unknown): value is ProviderConfig {
 }
 
 /** 老配置自动从模板/字段推断，新配置的显式声明优先。 */
-export function resolveVideoCapabilities(provider: ProviderConfig | null | undefined): Required<Pick<VideoProviderCapabilities, 'textToVideo' | 'imageToVideo' | 'lastFrame' | 'nativeAudio'>> & VideoProviderCapabilities {
+export type ResolvedVideoProviderCapabilities = Required<Pick<VideoProviderCapabilities, 'textToVideo' | 'imageToVideo' | 'lastFrame' | 'nativeAudio' | 'referenceInputs'>> & VideoProviderCapabilities & {
+  referenceInputs: {
+    images: { max: number; modes: ImageReferenceMode[]; transport: 'dataurl' | 'url' | 'either' }
+    videos: { max: number; transport: 'url' }
+    mixed: boolean
+  }
+}
+
+export function resolveVideoCapabilities(provider: ProviderConfig | null | undefined): ResolvedVideoProviderCapabilities {
   const template = provider?.bodyTemplate || ''
   const explicit = provider?.capabilities || {}
-  const inferredImage = /\{imageUrl\}/.test(template) || (!!provider?.imageField && provider.imageMode !== 'none')
+  const explicitRefs = explicit.referenceInputs
+  const inferredImage = /\{imageUrl\}|\{\$images\}/.test(template) || (!!provider?.imageField && provider.imageMode !== 'none')
   const inferredLastFrame = /\{lastImageUrl\}/.test(template)
   const inferredAudio = /generate_?audio|"audio"\s*:\s*(?:true|1)/i.test(template)
+  const imageToVideo = explicit.imageToVideo ?? inferredImage
+  const lastFrame = explicit.lastFrame ?? inferredLastFrame
+  const defaultImageMax = imageToVideo ? (lastFrame ? 2 : 1) : 0
+  const imageMax = imageToVideo ? boundedCount(explicitRefs?.images?.max, defaultImageMax, 99) : 0
+  const defaultModes: ImageReferenceMode[] = imageMax > 2 ? ['single', 'keyframes', 'multi'] : lastFrame && imageMax > 1 ? ['single', 'keyframes'] : imageMax ? ['single'] : []
+  const videoMax = boundedCount(explicitRefs?.videos?.max, 0, 99)
   return {
     textToVideo: explicit.textToVideo ?? true,
-    imageToVideo: explicit.imageToVideo ?? inferredImage,
-    lastFrame: explicit.lastFrame ?? inferredLastFrame,
+    imageToVideo: imageToVideo && imageMax > 0,
+    lastFrame: lastFrame && imageMax > 1,
     nativeAudio: explicit.nativeAudio ?? inferredAudio,
     aspects: uniqueStrings(explicit.aspects),
     durations: uniquePositiveNumbers(explicit.durations),
-    resolutions: uniqueStrings(explicit.resolutions)
+    resolutions: uniqueStrings(explicit.resolutions),
+    referenceInputs: {
+      images: {
+        max: imageMax,
+        modes: imageReferenceModes(explicitRefs?.images?.modes, defaultModes),
+        transport: explicitRefs?.images?.transport === 'url' || explicitRefs?.images?.transport === 'dataurl'
+          ? explicitRefs.images.transport
+          : 'either'
+      },
+      videos: { max: videoMax, transport: 'url' },
+      mixed: explicitRefs?.mixed ?? false
+    }
   }
 }
 
@@ -152,8 +202,12 @@ export function validateProviderConfig(provider: ProviderConfig, rawHeaders?: st
     if (provider.pollUrl && !httpUrl(provider.pollUrl.replace('{taskId}', 'task-demo'))) error('pollUrl', '轮询 URL 不是有效地址')
     if (provider.pollUrl && !provider.pollUrl.includes('{taskId}')) error('pollUrl', '轮询 URL 必须包含 {taskId}')
     if (!provider.bodyTemplate?.includes('{prompt}')) error('bodyTemplate', '请求体模板必须包含 {prompt}')
-    if (capabilities.imageToVideo && !provider.bodyTemplate?.includes('{imageUrl}')) error('capabilities.imageToVideo', '已启用图生视频，但请求体模板没有 {imageUrl}')
-    if (capabilities.lastFrame && !provider.bodyTemplate?.includes('{lastImageUrl}')) error('capabilities.lastFrame', '已启用尾帧，但请求体模板没有 {lastImageUrl}')
+    const usesImageArray = provider.bodyTemplate?.includes('{$images}')
+    if (capabilities.imageToVideo && !provider.bodyTemplate?.includes('{imageUrl}') && !usesImageArray) error('capabilities.imageToVideo', '已启用图生视频，但请求体模板没有 {imageUrl} 或 {$images}')
+    if (capabilities.lastFrame && !provider.bodyTemplate?.includes('{lastImageUrl}') && !usesImageArray) error('capabilities.lastFrame', '已启用尾帧，但请求体模板没有 {lastImageUrl} 或 {$images}')
+    if (capabilities.referenceInputs.images.max > 2 && !usesImageArray) error('capabilities.referenceInputs.images', '支持 3 张以上参考图时，请求体模板必须使用 {$images}')
+    if (capabilities.referenceInputs.images.max > 1 && !usesImageArray && !provider.bodyTemplate?.includes('{lastImageUrl}')) error('capabilities.referenceInputs.images', '支持多张参考图时，请使用 {$images}；两帧模板也可使用 {imageUrl} 与 {lastImageUrl}')
+    if (capabilities.referenceInputs.videos.max > 0 && !provider.bodyTemplate?.includes('{$videos}')) error('capabilities.referenceInputs.videos', '已启用参考视频，但请求体模板没有 {$videos}')
     if (!provider.videoUrlPath?.trim()) error('videoUrlPath', '请填写结果 URL 路径')
     try {
       const preview = buildProviderRequestPreview(provider, false)
@@ -169,6 +223,8 @@ export function validateProviderConfig(provider: ProviderConfig, rawHeaders?: st
     if (!provider.resultPath?.trim()) error('resultPath', '请填写结果 URL 路径')
     if (capabilities.imageToVideo && (!provider.imageField?.trim() || !provider.imageMode || provider.imageMode === 'none')) error('capabilities.imageToVideo', '已启用图生视频，请配置图片字段并选择 DataURL 或公网 URL 模式')
     if (capabilities.lastFrame) error('capabilities.lastFrame', '字段映射模式暂不支持尾帧；请改用包含 {lastImageUrl} 的请求体模板')
+    if (capabilities.referenceInputs.images.max > 1) error('capabilities.referenceInputs.images', '字段映射模式只支持 1 张图片；多图请改用 {$images} 请求体模板')
+    if (capabilities.referenceInputs.videos.max > 0) error('capabilities.referenceInputs.videos', '字段映射模式不支持参考视频；请改用 {$videos} 请求体模板')
     if (capabilities.imageToVideo && provider.imageMode === 'url' && !provider.uploadUrl?.trim()) error('uploadUrl', '公网 URL 图片模式需要配置图床上传 URL')
     if (!provider.statusPath?.includes('{id}')) warning('statusPath', '轮询路径未包含 {id}，仅适用于同步返回结果的接口')
     if (provider.extraBody?.trim()) {
@@ -181,8 +237,9 @@ export function validateProviderConfig(provider: ProviderConfig, rawHeaders?: st
     }
   }
 
-  if (!capabilities.textToVideo && !capabilities.imageToVideo) error('capabilities', '至少启用文生视频或图生视频之一')
+  if (!capabilities.textToVideo && !capabilities.imageToVideo && capabilities.referenceInputs.videos.max === 0) error('capabilities', '至少启用文生视频、图生视频或参考视频输入之一')
   if (capabilities.lastFrame && !capabilities.imageToVideo) error('capabilities.lastFrame', '启用尾帧前必须先启用图生视频')
+  if (capabilities.referenceInputs.mixed && (!capabilities.referenceInputs.images.max || !capabilities.referenceInputs.videos.max)) error('capabilities.referenceInputs.mixed', '混合引用需要同时启用图片和视频输入')
   if (provider.models?.length && !provider.model) warning('model', '尚未选择默认模型，将使用模型清单第一项')
   if (provider.submitRetries != null && (!Number.isInteger(provider.submitRetries) || provider.submitRetries < 0 || provider.submitRetries > 5)) error('submitRetries', '提交重试次数必须是 0～5 的整数')
   if (provider.pollIntervalMs != null && provider.pollIntervalMs < 500) warning('pollIntervalMs', '轮询间隔低于 500ms，可能触发服务端限流')
@@ -206,14 +263,21 @@ export function buildProviderRequestPreview(provider: ProviderConfig, hasKey: bo
 
   const capabilities = resolveVideoCapabilities(provider)
   if (provider.bodyTemplate != null) {
+    const imageCount = capabilities.referenceInputs.images.max
+    const images = imageCount > 0
+      ? Array.from({ length: Math.min(imageCount, 2) }, (_, index) => `https://example.invalid/reference-${index + 1}.png`)
+      : undefined
+    const videos = capabilities.referenceInputs.videos.max > 0 ? ['https://example.invalid/reference.mp4'] : undefined
     const rendered = renderProviderTemplate(provider.bodyTemplate, {
       prompt: '示例视频描述',
       model: provider.model || provider.models?.[0] || 'model-id',
       aspect: capabilities.aspects?.[0] || '16:9',
       duration: String(capabilities.durations?.[0] || 5),
       resolution: capabilities.resolutions?.[0] || '720p',
-      imageUrl: capabilities.imageToVideo ? 'https://example.invalid/reference.png' : undefined,
-      lastImageUrl: capabilities.lastFrame ? 'https://example.invalid/last-frame.png' : undefined,
+      imageUrl: images?.[0],
+      lastImageUrl: capabilities.lastFrame ? images?.[1] : undefined,
+      images,
+      videos,
       noImage: capabilities.imageToVideo ? undefined : '1'
     })
     let body: unknown

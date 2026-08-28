@@ -1,7 +1,7 @@
 import type { Card, CardKind, WorkflowRun } from '../types'
 import { useGraph } from '../store/graphStore'
 import { useProviders } from '../store/providerStore'
-import { buildMaterials, isUsableMaterial } from './references'
+import { selectedGenMaterials } from './references'
 import { canGenerateCard } from './nodeCapabilities'
 import { resolveModelId } from './models'
 import { resolveVideoCapabilities, validateProviderConfig } from './providers/config'
@@ -131,9 +131,23 @@ export async function buildCardGenerationPlan(cardIds: string[], title = '批量
         }
         if (card.kind === 'video') {
           const capabilities = resolveVideoCapabilities(provider)
-          const hasImage = buildMaterials(card, board, graph.project).some((material) => material.kind === 'image' && isUsableMaterial(material))
-          if (hasImage && !capabilities.imageToVideo) issues.push({ level: 'error', cardId, message: `「${card.title}」包含首帧/参考图，但当前 Provider 不支持图生视频。` })
-          if (!hasImage && !capabilities.textToVideo) issues.push({ level: 'error', cardId, message: `「${card.title}」没有图片输入，而当前 Provider 不支持文生视频。` })
+          const references = selectedGenMaterials(card, board, undefined, graph.project)
+          const images = references.filter((material) => material.kind === 'image')
+          const videos = references.filter((material) => material.kind === 'video')
+          const refMode = card.params?.refMode === 'keyframe' ? 'keyframe' : 'omni'
+          const imageLimit = refMode === 'keyframe'
+            ? Math.min(2, capabilities.referenceInputs.images.max)
+            : capabilities.referenceInputs.images.modes.includes('multi')
+              ? capabilities.referenceInputs.images.max
+              : Math.min(1, capabilities.referenceInputs.images.max)
+          if (images.length && !capabilities.imageToVideo) issues.push({ level: 'error', cardId, message: `「${card.title}」包含参考图，但当前 Provider 不支持图生视频。` })
+          if (images.length > imageLimit) issues.push({ level: 'error', cardId, message: `「${card.title}」当前参考模式最多使用 ${imageLimit} 张图，当前选择了 ${images.length} 张。` })
+          if (videos.length > capabilities.referenceInputs.videos.max) issues.push({ level: 'error', cardId, message: capabilities.referenceInputs.videos.max
+            ? `「${card.title}」有 ${videos.length} 条参考视频，超过 Provider 上限 ${capabilities.referenceInputs.videos.max} 条。`
+            : `「${card.title}」包含参考视频，但当前 Provider 不支持视频引用。` })
+          if (images.length && videos.length && !capabilities.referenceInputs.mixed) issues.push({ level: 'error', cardId, message: `「${card.title}」同时引用图片和视频，但当前 Provider 不支持混合引用。` })
+          if (videos.some((material) => !/^https?:\/\//i.test(material.assetUrl || ''))) issues.push({ level: 'error', cardId, message: `「${card.title}」包含仅本地可用的参考视频；请改为公开 http(s) URL。` })
+          if (!images.length && !videos.length && !capabilities.textToVideo) issues.push({ level: 'error', cardId, message: `「${card.title}」没有参考素材，而当前 Provider 不支持文生视频。` })
           item.duration = numberValue(card.params?.duration) || capabilities.durations?.[0] || 5
           item.aspect = typeof card.params?.aspect === 'string' ? card.params.aspect : capabilities.aspects?.[0] || '16:9'
           item.resolution = typeof card.params?.resolution === 'string' ? card.params.resolution : capabilities.resolutions?.[0]

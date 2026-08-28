@@ -1,15 +1,15 @@
 import { useRef, useState, type ChangeEvent, type CSSProperties } from 'react'
-import { Trash2, Sparkles, Square, Download, X, Link2, Plus, Image as ImageIcon, Video, Type as TypeIcon, Music, Clapperboard, Film, Wand2, ScanText, Loader2, Maximize2, FolderOpen, RefreshCcw, Eye, History } from 'lucide-react'
+import { Trash2, Sparkles, Square, Download, X, Link2, Plus, Image as ImageIcon, Video, Type as TypeIcon, Music, Clapperboard, Film, Wand2, ScanText, Loader2, Maximize2, FolderOpen, RefreshCcw, Eye, History, ArrowUp, ArrowDown, Globe2 } from 'lucide-react'
 import { useGraph } from '../store/graphStore'
 import { useUi } from '../store/uiStore'
 import { useProviders } from '../store/providerStore'
-import { buildMaterials, findUnresolvedMentions, isUsableMaterial, resolveGenerationPrompt, selectedGenMaterials } from '../services/references'
+import { buildMaterials, findUnresolvedMentions, isUsableMaterial, orderedGenerationMaterials, resolveGenerationPrompt, selectedGenMaterials } from '../services/references'
 import { generateCard, stopCard, canGenerate } from '../services/generate'
 import { shotToVideo } from '../services/storyboard'
 import { polishPrompt, describeImage } from '../services/promptTools'
 import { directorPromptStatus } from '../services/directorPrompt'
 import { PROMPT_PRESETS, PRESET_GROUPS, type Preset } from '../services/presets'
-import { isImeComposing } from '../util'
+import { isImeComposing, uid } from '../util'
 import { worldToScreen } from './viewport'
 import { stageEl } from './stageEl'
 import { ModelPicker } from '../components/ModelPicker'
@@ -25,6 +25,7 @@ import { useModalEsc } from '../modalStack'
 import { projectAnchorMaterials } from '../services/semanticAssets'
 import { storyboardBacklink } from '../services/storyboardV2'
 import { readCardMediaVersions } from '../services/mediaVersions'
+import { resolveVideoCapabilities } from '../services/providers/config'
 
 const MAT_ICON: Record<MaterialKind, typeof ImageIcon> = { image: ImageIcon, video: Video, audio: Music, text: TypeIcon }
 const PANEL_W = 620
@@ -115,6 +116,7 @@ export function NodeEditor() {
   const [toolBusy, setToolBusy] = useState(false)
   const [importBusy, setImportBusy] = useState(false)
   const [draggingAssets, setDraggingAssets] = useState(false)
+  const [remoteVideoUrl, setRemoteVideoUrl] = useState('')
   const [expand, setExpand] = useState(false)
   const [openInfo, setOpenInfo] = useState<{ cardId: string; panel: 'preview' | 'trace' } | null>(null)
   const editorCard = selectedIds.length === 1 ? board.cards[selectedIds[0]] : undefined
@@ -128,13 +130,14 @@ export function NodeEditor() {
 
   const vp = board.viewport
   const accent = KIND_ACCENT[card.kind]
-  const materials = buildMaterials(card, board, project)
-  const acceptedKinds = acceptedMaterialKinds(card)
+  const videoProvider = card.kind === 'video' ? activeVideoProvider || undefined : undefined
+  const materials = orderedGenerationMaterials(card, buildMaterials(card, board, project))
+  const acceptedKinds = acceptedMaterialKinds(card, videoProvider)
   const genMaterials = selectedGenMaterials(card, board, materials)
-  const acceptedMaterials = materials.filter((material) => acceptsMaterialKind(card, material.kind) && isUsableMaterial(material))
+  const acceptedMaterials = materials.filter((material) => acceptsMaterialKind(card, material.kind, videoProvider) && isUsableMaterial(material))
   const unresolvedMentions = findUnresolvedMentions(card.prompt || '', acceptedMaterials)
   const promptPurpose = card.kind === 'text' ? 'text' : card.kind === 'audio' ? 'speech' : 'media'
-  const resolvedPrompt = resolveGenerationPrompt(card, board, promptPurpose, project)
+  const resolvedPrompt = resolveGenerationPrompt(card, board, promptPurpose, project, videoProvider)
   const selectedTextMaterials = genMaterials.filter((m) => m.kind === 'text')
   const hasUsableUpstreamText = resolvedPrompt.inputs.texts.length > 0
   const hasEmptyUpstreamText = materials.some((m) => acceptsMaterialKind(card, m.kind) && m.kind === 'text' && !m.unavailable && !m.text?.trim())
@@ -153,6 +156,28 @@ export function NodeEditor() {
   const previewOpen = openInfo?.cardId === card.id && openInfo.panel === 'preview'
   const traceOpen = openInfo?.cardId === card.id && openInfo.panel === 'trace'
   const directorState = card.kind === 'video' ? directorPromptStatus(card, board, project, activeVideoProvider) : null
+  const videoCapabilities = card.kind === 'video' ? resolveVideoCapabilities(activeVideoProvider) : null
+  const videoReferenceMaterials = card.kind === 'video'
+    ? materials.filter((material) => (material.kind === 'image' || material.kind === 'video') && isUsableMaterial(material))
+    : []
+  const selectedImages = genMaterials.filter((material) => material.kind === 'image')
+  const selectedVideos = genMaterials.filter((material) => material.kind === 'video')
+  const localOnlyVideos = selectedVideos.filter((material) => !/^https?:\/\//i.test(material.assetUrl || ''))
+  const currentRefMode = card.params?.refMode === 'keyframe' ? 'keyframe' : 'omni'
+  const videoImageLimit = currentRefMode === 'keyframe'
+    ? Math.min(2, videoCapabilities?.referenceInputs.images.max || 0)
+    : videoCapabilities?.referenceInputs.images.modes.includes('multi')
+      ? videoCapabilities.referenceInputs.images.max
+      : Math.min(1, videoCapabilities?.referenceInputs.images.max || 0)
+  const inferredVideoMode = selectedVideos.length
+    ? 'mixed2video'
+    : selectedImages.length === 0
+      ? 'text2video'
+      : selectedImages.length === 1
+        ? 'singleImage2video'
+        : selectedImages.length === 2
+          ? 'frames2video'
+          : 'image2video'
   const shotBacklink = storyboardBacklink(card)
 
   const copyGenerationTrace = async () => {
@@ -192,8 +217,8 @@ export function NodeEditor() {
     try {
       const resources = await loadImportedResources(files, paths)
       if (!resources.length) return
-      const accepted = resources.filter((resource) => acceptsMaterialKind(card, resource.kind))
-      const rejected = resources.filter((resource) => !acceptsMaterialKind(card, resource.kind))
+      const accepted = resources.filter((resource) => acceptsMaterialKind(card, resource.kind, videoProvider))
+      const rejected = resources.filter((resource) => !acceptsMaterialKind(card, resource.kind, videoProvider))
       if (rejected.length) {
         const allowed = acceptedKinds.map(materialKindLabel).join('、') || '无'
         toast(`已忽略 ${rejected.length} 个不兼容素材；${KIND_LABEL[card.kind]}节点可接收：${allowed}`, 'warning')
@@ -202,7 +227,17 @@ export function NodeEditor() {
       const current = useGraph.getState().getCard(card.id)
       if (!current) return
       useGraph.getState().pushHistory()
-      updateCard(card.id, { assets: [...(current.assets || []), ...resourcesToNodeAssets(accepted)] })
+      const appended = resourcesToNodeAssets(accepted)
+      const currentOrder = card.kind === 'video'
+        ? videoReferenceMaterials.map((material) => material.matId)
+        : Array.isArray(current.params?.referenceOrder) ? current.params.referenceOrder.filter((value): value is string => typeof value === 'string') : []
+      updateCard(card.id, {
+        assets: [...(current.assets || []), ...appended],
+        params: {
+          ...current.params,
+          referenceOrder: [...currentOrder, ...appended.filter((asset) => asset.kind === 'image' || asset.kind === 'video').map((asset) => `upload:${asset.id}`)]
+        }
+      })
       toast(`已添加 ${accepted.length} 个节点素材`, 'success')
     } finally {
       setImportBusy(false)
@@ -304,6 +339,10 @@ export function NodeEditor() {
   }
 
   const removeMaterial = (m: Material) => {
+    const referenceOrder = Array.isArray(card.params?.referenceOrder)
+      ? card.params.referenceOrder.filter((id): id is string => typeof id === 'string' && id !== m.matId)
+      : undefined
+    const params = referenceOrder ? { ...card.params, referenceOrder } : card.params
     if (m.origin === 'upload') {
       const assetId = m.matId.slice('upload:'.length)
       const nextMissing = missingMediaRefs.filter((label) => label !== `input:${assetId}`)
@@ -314,15 +353,51 @@ export function NodeEditor() {
         delete meta.mediaMissing
       }
       useGraph.getState().pushHistory()
-      updateCard(card.id, { assets: (card.assets || []).filter((a) => 'upload:' + a.id !== m.matId), meta })
+      updateCard(card.id, { assets: (card.assets || []).filter((a) => 'upload:' + a.id !== m.matId), meta, params })
     } else if (m.origin === 'anchor' && m.anchorId) {
       useGraph.getState().removeAnchorReference(card.id, m.anchorId)
+      if (referenceOrder) updateCard(card.id, { params })
     } else if (m.origin === 'card') {
       useGraph.getState().pushHistory()
-      updateCard(card.id, { refIds: card.refIds.filter((id) => 'card:' + id !== m.matId) })
+      updateCard(card.id, { refIds: card.refIds.filter((id) => 'card:' + id !== m.matId), params })
     } else {
       for (const e of Object.values(board.edges)) if (e.target === card.id && e.source === m.cardId) removeEdge(e.id)
+      if (referenceOrder) updateCard(card.id, { params })
     }
+  }
+
+  const moveVideoReference = (matId: string, delta: -1 | 1) => {
+    const ids = videoReferenceMaterials.map((material) => material.matId)
+    const index = ids.indexOf(matId)
+    const target = index + delta
+    if (index < 0 || target < 0 || target >= ids.length) return
+    ;[ids[index], ids[target]] = [ids[target], ids[index]]
+    useGraph.getState().pushHistory()
+    updateCard(card.id, { params: { ...card.params, referenceOrder: ids } })
+  }
+
+  const addRemoteVideoReference = () => {
+    const value = remoteVideoUrl.trim()
+    let parsed: URL
+    try {
+      parsed = new URL(value)
+      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('protocol')
+    } catch {
+      toast('请输入完整的 http(s) 视频 URL', 'error')
+      return
+    }
+    const current = useGraph.getState().getCard(card.id)
+    if (!current) return
+    const id = uid('asset')
+    const name = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || '参考视频')
+    const currentOrder = videoReferenceMaterials.map((material) => material.matId)
+    useGraph.getState().pushHistory()
+    updateCard(card.id, {
+      assets: [...(current.assets || []), { id, kind: 'video', url: value, name, mime: 'video/mp4' }],
+      params: { ...current.params, referenceOrder: [...currentOrder, `upload:${id}`] }
+    })
+    setRemoteVideoUrl('')
+    toast('已添加公开视频参考', 'success')
   }
 
   const insertToken = (material: Material, start: number, end: number) => {
@@ -415,7 +490,7 @@ export function NodeEditor() {
     ...materials,
     ...projectAnchorMaterials(project).filter((candidate) => candidate.cardId !== card.id && !materials.some((material) => material.matId === candidate.matId))
   ]
-  const refList = mention && mention.mode === 'ref' ? menuMaterials.filter((m) => acceptsMaterialKind(card, m.kind) && isUsableMaterial(m) && (!mention.query || m.label.includes(mention.query))) : []
+  const refList = mention && mention.mode === 'ref' ? menuMaterials.filter((m) => acceptsMaterialKind(card, m.kind, videoProvider) && isUsableMaterial(m) && (!mention.query || m.label.includes(mention.query))) : []
   const presetList = mention && mention.mode === 'preset' ? PROMPT_PRESETS.filter((p) => !mention.query || p.label.includes(mention.query) || p.text.includes(mention.query)) : []
   const listLen = mention?.mode === 'preset' ? presetList.length : refList.length
   const menuW = mention ? Math.max(200, mention.aw) : 200
@@ -492,7 +567,7 @@ export function NodeEditor() {
               {generatable &&
                 materials.map((m) => {
                   const Icon = MAT_ICON[m.kind]
-                  const kindAccepted = acceptsMaterialKind(card, m.kind)
+                  const kindAccepted = acceptsMaterialKind(card, m.kind, videoProvider)
                   const accepted = kindAccepted && isUsableMaterial(m)
                   return (
                     <div
@@ -626,26 +701,66 @@ export function NodeEditor() {
 
           <SemanticAnchorPanel key={card.id} card={card} />
 
-          {/* 视频参考形式 */}
+          {/* 视频多模态参考 */}
           {card.kind === 'video' && generatable && (
-            <div className="flex items-center gap-1 text-[11px]">
-              {(['keyframe', 'omni'] as const).map((m) => {
-                const cur = (card.params?.refMode as string) || 'omni'
-                return (
-                  <button
-                    key={m}
-                    onClick={() => {
-                      if (((card.params?.refMode as string) || 'omni') === m) return
-                      useGraph.getState().pushHistory()
-                      updateCard(card.id, { params: { ...card.params, refMode: m } })
-                    }}
-                    className={`px-2 py-0.5 rounded ${cur === m ? 'bg-indigo-500 text-white' : 'bg-black/5 dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/20'}`}
-                  >
-                    {m === 'keyframe' ? '首帧/尾帧' : '全能参考'}
-                  </button>
-                )
-              })}
-              <span className="opacity-50 ml-1 truncate">{(card.params?.refMode as string) === 'keyframe' ? '连入第1张=首帧，第2张=尾帧' : '连入图作为参考'}</span>
+            <div className="rounded-lg border px-2.5 py-2 text-[11px] space-y-2" style={{ borderColor: 'var(--ace-border)' }}>
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="font-medium shrink-0">参考素材</span>
+                <span className="opacity-55 truncate">
+                  {activeVideoProvider
+                    ? `${activeVideoProvider.label} · 图片 ${selectedImages.length}/${videoImageLimit} · 视频 ${selectedVideos.length}/${videoCapabilities?.referenceInputs.videos.max || 0}`
+                    : '未配置视频 Provider'}
+                </span>
+                <span className="ml-auto shrink-0 rounded bg-indigo-500/10 px-1.5 py-0.5 text-indigo-600 dark:text-indigo-300">{inferredVideoMode}</span>
+              </div>
+
+              {!!videoReferenceMaterials.length && (
+                <div className="space-y-1">
+                  {videoReferenceMaterials.map((material, index) => {
+                    const Icon = MAT_ICON[material.kind]
+                    const selected = genMaterials.some((candidate) => candidate.matId === material.matId)
+                    return (
+                      <div key={material.matId} className={`flex items-center gap-1.5 rounded px-1.5 py-1 ${selected ? 'bg-black/5 dark:bg-white/5' : 'opacity-45'}`}>
+                        <span className="w-4 text-center tabular-nums opacity-45">{index + 1}</span>
+                        <Icon size={12} style={{ color: KIND_ACCENT[material.kind] }} />
+                        <span className="flex-1 truncate">{material.label}</span>
+                        {material.kind === 'video' && !/^https?:\/\//i.test(material.assetUrl || '') && <span className="text-amber-600 dark:text-amber-300 shrink-0">仅本地</span>}
+                        <button type="button" disabled={index === 0} onClick={() => moveVideoReference(material.matId, -1)} title="上移" className="p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 disabled:opacity-20"><ArrowUp size={11} /></button>
+                        <button type="button" disabled={index === videoReferenceMaterials.length - 1} onClick={() => moveVideoReference(material.matId, 1)} title="下移" className="p-0.5 rounded hover:bg-black/10 dark:hover:bg-white/10 disabled:opacity-20"><ArrowDown size={11} /></button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {(videoCapabilities?.referenceInputs.videos.max || 0) > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <Globe2 size={12} className="opacity-45 shrink-0" />
+                  <input
+                    value={remoteVideoUrl}
+                    onChange={(event) => setRemoteVideoUrl(event.target.value)}
+                    onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addRemoteVideoReference() } }}
+                    placeholder="添加公开参考视频 URL（http/https）"
+                    className="ace-input flex-1 min-w-0"
+                  />
+                  <button type="button" onClick={addRemoteVideoReference} className="shrink-0 rounded bg-indigo-500/10 px-2 py-1 text-indigo-600 hover:bg-indigo-500/20 dark:text-indigo-300">添加</button>
+                </div>
+              )}
+
+              {(selectedImages.length > videoImageLimit
+                || selectedVideos.length > (videoCapabilities?.referenceInputs.videos.max || 0)
+                || (!!selectedImages.length && !!selectedVideos.length && !videoCapabilities?.referenceInputs.mixed)
+                || !!localOnlyVideos.length) && (
+                <div className="rounded bg-amber-500/10 px-2 py-1.5 text-amber-700 dark:text-amber-300">
+                  {localOnlyVideos.length
+                    ? `有 ${localOnlyVideos.length} 条本地视频不能直接提交；请改用公开 URL。`
+                    : selectedImages.length > videoImageLimit
+                      ? `参考图超过当前 Provider 上限，请移除或更换 Provider。`
+                      : selectedVideos.length > (videoCapabilities?.referenceInputs.videos.max || 0)
+                        ? `参考视频超过当前 Provider 上限，请移除或更换 Provider。`
+                        : '当前 Provider 不支持图片与视频混合引用。'}
+                </div>
+              )}
             </div>
           )}
 

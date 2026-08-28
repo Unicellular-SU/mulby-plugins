@@ -138,8 +138,9 @@ export async function generateCard(cardId: string): Promise<void> {
     g0.updateCard(cardId, { status: 'error', error: '请输入场景描述、连接文本卡片或添加参考图片' })
     return
   }
-  if (card0.kind === 'video' && !resolved0.text.trim() && !hasRealImage) {
-    g0.updateCard(cardId, { status: 'error', error: '请输入视频描述、连接文本卡片或添加参考图片' })
+  const hasRealVideo = resolved0.inputs.videos.length > 0
+  if (card0.kind === 'video' && !resolved0.text.trim() && !hasRealImage && !hasRealVideo) {
+    g0.updateCard(cardId, { status: 'error', error: '请输入视频描述、连接文本卡片或添加参考素材' })
     return
   }
   const badMentions = findUnresolvedMentions(
@@ -343,26 +344,51 @@ async function generateVideoCard(cardId: string): Promise<void> {
       if (!cfg) throw new Error('未配置视频 Provider（右上角“设置”）')
       const capabilities = resolveVideoCapabilities(cfg)
       const key = await useProviders.getState().getKey(cfg.id)
+      // 先按画布通用上限解析全部引用，再显式对照当前 Provider 校验；禁止静默截断多余素材。
       const resolved = resolveGenerationPrompt(card, board, 'media', g.project)
       const inputs = resolved.inputs
-      if (!inputs.images.length && !capabilities.textToVideo) {
-        throw new Error(`当前 Provider「${cfg.label}」仅支持图生视频，请先连接或上传参考图片`)
+      const refMode = (card.params?.refMode as string) || 'omni'
+      const imageLimit = refMode === 'keyframe'
+        ? Math.min(2, capabilities.referenceInputs.images.max)
+        : capabilities.referenceInputs.images.modes.includes('multi')
+          ? capabilities.referenceInputs.images.max
+          : Math.min(1, capabilities.referenceInputs.images.max)
+      const videoLimit = capabilities.referenceInputs.videos.max
+      if (!inputs.images.length && !inputs.videos.length && !capabilities.textToVideo) {
+        throw new Error(`当前 Provider「${cfg.label}」需要参考素材，请先连接或添加受支持的图片/视频`)
       }
       if (inputs.images.length && !capabilities.imageToVideo) {
         throw new Error(`当前 Provider「${cfg.label}」未声明图生视频能力，请移除图片输入或在 Provider 设置中启用`)
       }
-      const toDataUrl = async (im: { url?: string; localPath?: string; mime?: string }) => {
+      if (inputs.images.length > imageLimit) {
+        throw new Error(`当前 Provider「${cfg.label}」最多支持 ${imageLimit} 张参考图，当前选择了 ${inputs.images.length} 张`)
+      }
+      if (inputs.videos.length > videoLimit) {
+        throw new Error(videoLimit > 0
+          ? `当前 Provider「${cfg.label}」最多支持 ${videoLimit} 条参考视频，当前选择了 ${inputs.videos.length} 条`
+          : `当前 Provider「${cfg.label}」不支持参考视频，请移除视频输入或更换 Provider`)
+      }
+      if (inputs.images.length && inputs.videos.length && !capabilities.referenceInputs.mixed) {
+        throw new Error(`当前 Provider「${cfg.label}」不支持图片与视频混合引用`)
+      }
+      const toImageInput = async (im: { url?: string; localPath?: string; mime?: string }) => {
+        const remoteUrl = im.url && /^https?:\/\//i.test(im.url) ? im.url : undefined
+        const transport = capabilities.referenceInputs.images.transport
+        if (remoteUrl && transport !== 'dataurl') return remoteUrl
+        if (transport === 'url' && !cfg.uploadUrl) {
+          throw new Error(`当前 Provider「${cfg.label}」要求公网图片 URL；请使用网络图片或配置图片上传地址`)
+        }
         const bytes = await loadImageInput(im)
         return bytes ? `data:${im.mime || 'image/png'};base64,${arrayBufferToBase64(bytes)}` : undefined
       }
-      const refMode = (card.params?.refMode as string) || 'omni'
-      let imageDataUrl: string | undefined
-      let lastImageDataUrl: string | undefined
-      if (inputs.images[0]) imageDataUrl = await toDataUrl(inputs.images[0])
-      if (refMode === 'keyframe' && inputs.images[1]) {
-        if (!capabilities.lastFrame) throw new Error(`当前 Provider「${cfg.label}」不支持尾帧输入`)
-        lastImageDataUrl = await toDataUrl(inputs.images[1])
+      if (refMode === 'keyframe' && inputs.images.length > 1 && !capabilities.lastFrame) {
+        throw new Error(`当前 Provider「${cfg.label}」不支持尾帧输入`)
       }
+      const imageDataUrls = (await Promise.all(inputs.images.map(toImageInput))).filter((value): value is string => !!value)
+      const videoUrls = inputs.videos.map((video) => {
+        if (video.url && /^https?:\/\//i.test(video.url)) return video.url
+        throw new Error(`参考视频「${video.label}」只有本地文件；当前版本需要公开 http(s) URL，请在节点中添加网络视频地址`)
+      })
       const proj = g.project
       const vboard = proj.boards.find((b) => b.cards[cardId]) ?? g.getActiveBoard()
       const vtag = videoStyleTag(vboard.stylePackId ?? proj.stylePackId, vboard.style ?? proj.style)
@@ -394,7 +420,7 @@ async function generateVideoCard(cardId: string): Promise<void> {
       const { url, taskId } = await submitVideoJob(
         cfg,
         key,
-        { prompt: vprompt, imageDataUrl, lastImageDataUrl, model: card.modelId || undefined, params: sentParams },
+        { prompt: vprompt, imageDataUrls, videoUrls, model: card.modelId || undefined, params: sentParams },
         (p) => commit({ progress: p }),
         (tid) => {
           // 持久化 taskId：释放槽位后由池外轮询续跑；切/关工程后也能由 resumeInflightVideos 接管
@@ -473,6 +499,7 @@ async function generateVideoCard(cardId: string): Promise<void> {
           promptLength: submit.sentPrompt.length,
           promptTruncated: submit.sentPrompt.length > 8000,
           fromDirectorPrompt: !!submit.directorFingerprint,
+          sourceUrl: url,
           startedAt: submit.startedAt,
           completedAt: Date.now()
         }
@@ -547,6 +574,7 @@ async function resumeVideoCard(cardId: string, task: PersistedVideoTask): Promis
           providerId: cfg.id,
           modelId: task.modelId || cfg.model || null,
           taskIds: [task.taskId],
+          sourceUrl: url,
           sentPrompt,
           promptLength: task.promptLength ?? sentPrompt.length,
           promptTruncated: (task.promptLength ?? sentPrompt.length) > sentPrompt.length,

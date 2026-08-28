@@ -97,7 +97,7 @@ function testInputPolicies() {
   assert.deepEqual(inputPolicyFor(card('source')), { accepted: [] })
   assert.deepEqual(inputPolicyFor(card('group')), { accepted: [] })
   assert.deepEqual(inputPolicyFor(card('note')), { accepted: [] })
-  assert.deepEqual(inputPolicyFor(card('video')), { accepted: ['text', 'image'], maxByKind: { image: 1 } })
+  assert.deepEqual(inputPolicyFor(card('video')), { accepted: ['text', 'image', 'video'], maxByKind: { image: 9, video: 3 } })
   assert.deepEqual(inputPolicyFor(card('video', { refMode: 'keyframe' })), { accepted: ['text', 'image'], maxByKind: { image: 2 } })
 
   assert.deepEqual(
@@ -107,6 +107,25 @@ function testInputPolicies() {
   assert.deepEqual(
     resolveNodeInputPolicy('video', { params: { refMode: 'keyframe' }, videoCapabilities: { imageToVideo: true, lastFrame: false } }),
     { accepted: ['text', 'image'], maxByKind: { image: 1 } }
+  )
+  assert.deepEqual(
+    resolveNodeInputPolicy('video', { videoCapabilities: { imageToVideo: true, lastFrame: true } }),
+    { accepted: ['text', 'image'], maxByKind: { image: 1 } },
+    '旧 Provider 的普通模式仍只能发送一张图'
+  )
+  assert.deepEqual(
+    resolveNodeInputPolicy('video', {
+      videoCapabilities: {
+        imageToVideo: true,
+        lastFrame: true,
+        referenceInputs: {
+          images: { max: 9, modes: ['single', 'keyframes', 'multi'], transport: 'either' },
+          videos: { max: 3, transport: 'url' },
+          mixed: true
+        }
+      }
+    }),
+    { accepted: ['text', 'image', 'video'], maxByKind: { image: 9, video: 3 } }
   )
 }
 

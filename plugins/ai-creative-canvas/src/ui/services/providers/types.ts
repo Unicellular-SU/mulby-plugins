@@ -1,6 +1,25 @@
 export type ProviderKind = 'video' | 'audio'
 export type ProviderType = 'openai-tts' | 'custom-video'
 
+export type ImageReferenceMode = 'single' | 'keyframes' | 'multi'
+export type ImageReferenceTransport = 'dataurl' | 'url' | 'either'
+
+export interface VideoReferenceInputCapabilities {
+  images?: {
+    /** 单次请求可消费的图片数。旧 Provider 未声明时按 imageToVideo/lastFrame 推断为 0/1/2。 */
+    max?: number
+    modes?: ImageReferenceMode[]
+    transport?: ImageReferenceTransport
+  }
+  videos?: {
+    /** 单次请求可消费的参考视频数；当前仅发送公开 http(s) URL。 */
+    max?: number
+    transport?: 'url'
+  }
+  /** 是否允许图片与视频同时出现在一次请求中。 */
+  mixed?: boolean
+}
+
 export interface VideoProviderCapabilities {
   textToVideo?: boolean
   imageToVideo?: boolean
@@ -9,6 +28,7 @@ export interface VideoProviderCapabilities {
   aspects?: string[]
   durations?: number[]
   resolutions?: string[]
+  referenceInputs?: VideoReferenceInputCapabilities
 }
 
 /** 可选费用声明。未填写时生成计划必须明确显示“费用未知”，不得伪造估算。 */
