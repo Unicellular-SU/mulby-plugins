@@ -1227,6 +1227,31 @@
       "sha256": "71c3182aca5dd7f2f5bfcfcfa18139043f5a3f23b29ed6df72812a2a6ede1be8",
       "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
       "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/video-toolbox"
+    },
+    {
+      "id": "secure-watermark",
+      "name": "secure-watermark",
+      "displayName": "证件安全水印",
+      "version": "1.0.0",
+      "author": "mulby",
+      "description": "批量为身份证、营业执照等图片添加文字或图片限制使用水印，保护证件隐私",
+      "downloadUrl": "https://github.com/Unicellular-SU/mulby-plugins/releases/download/v2026.09.14-0404/secure-watermark-1.0.0.inplugin",
+      "lastPackageTime": "2026-09-14T04:05:22.541Z",
+      "type": "media",
+      "details": "# 证件安全水印\n\n给身份证正反面、营业执照、银行卡等图片批量添加“仅供办理业务使用”等限制使用标识，降低证件被挪作他用的风险。处理在本机完成，原图不会被覆盖。\n\n## 功能\n\n- 批量导入 JPG、PNG、WebP、BMP（支持 Mulby 附件、文件选择和拖入）。\n- 文字水印：自定义文案、颜色、透明度、字号和倾斜角度，默认斜向平铺。\n- 图片水印：选择本地 Logo/印章素材，按原图宽度缩放，支持左上、右上、左下、右下、居中或平铺。\n- 实时预览：添加图片后显示第一张图片的合成效果，调整文字、图片水印或参数会自动刷新。\n- 内置预设：办理业务、入职专用、贷款审核、营业执照报税/年审。\n- 输出文件追加 `_watermarked`；PNG/WebP 尽量保持原格式，JPG/BMP 输出为 JPG。\n\n## 使用\n\n1. 在 Mulby 搜索 `图片水印`、`证件水印` 或 `watermark` 打开插件；也可以直接把图片附件交给插件。\n2. 添加待处理图片，填写限制使用文案；如需图片水印，选择 PNG 透明 Logo 并设置大小、位置或平铺。\n3. 点击“批量添加水印并导出”。新文件写回原图片所在目录，文件名带 `_watermarked`。\n\n## 开发\n\n```bash\nnpm install\nnpm run build\nnpm run pack\n```\n\n插件通过 `manifest.json` 声明 `watermark` 和 `watermark-files` 两个 UI 特性；后端 RPC 仅负责读取附件和写出结果，画布合成在插件窗口中完成。",
+      "icon": {
+        "type": "url",
+        "value": "https://raw.githubusercontent.com/Unicellular-SU/mulby-plugins/main/plugins/secure-watermark/icon.png"
+      },
+      "screenshots": [
+        {
+          "url": "https://raw.githubusercontent.com/Unicellular-SU/mulby-plugins/main/plugins/secure-watermark/screenshots/1.png",
+          "caption": "主界面"
+        }
+      ],
+      "sha256": "9ff08ab2ad815ca483d7c4b16b23b624d37942d1a51aeb65edfb1b4810c270cf",
+      "homepage": "https://github.com/Unicellular-SU/mulby-plugins",
+      "repository": "https://github.com/Unicellular-SU/mulby-plugins/tree/main/plugins/secure-watermark"
     }
   ]
 }
