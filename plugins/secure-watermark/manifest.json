@@ -1,0 +1,68 @@
+{
+  "id": "secure-watermark",
+  "name": "secure-watermark",
+  "displayName": "证件安全水印",
+  "version": "1.0.0",
+  "author": "mulby",
+  "type": "media",
+  "description": "批量为身份证、营业执照等图片添加文字或图片限制使用水印，保护证件隐私",
+  "main": "dist/main.js",
+  "ui": "ui/index.html",
+  "icon": "icon.png",
+  "window": {
+    "width": 980,
+    "height": 720,
+    "minWidth": 760,
+    "minHeight": 560,
+    "type": "default"
+  },
+  "features": [
+    {
+      "code": "watermark",
+      "explain": "打开证件安全水印工具",
+      "mode": "ui",
+      "cmds": [
+        {
+          "type": "keyword",
+          "value": "图片水印"
+        },
+        {
+          "type": "keyword",
+          "value": "证件水印"
+        },
+        {
+          "type": "keyword",
+          "value": "watermark"
+        }
+      ]
+    },
+    {
+      "code": "watermark-files",
+      "explain": "为选中的图片添加水印",
+      "mode": "ui",
+      "cmds": [
+        {
+          "type": "img"
+        },
+        {
+          "type": "files",
+          "fileType": "file",
+          "exts": [
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp",
+            ".bmp"
+          ]
+        }
+      ]
+    }
+  ],
+  "permissions": {
+    "filesystem": true,
+    "notification": true
+  },
+  "pluginSetting": {
+    "single": true
+  }
+}
